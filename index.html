@@ -4269,23 +4269,46 @@ function Stats({ entries, activityEntries = [], glossary = [], target, weights =
       : 'keine';
 
     const isFuture = analysisDateKey > todayKey();
-    const dateLabel = analysisDateKey === todayKey() ? 'heute' : (isFuture ? `am ${analysisDateKey} (in Zukunft)` : `am ${analysisDateKey}`);
+    const isEmpty = mealsBySlot.length === 0;
+    const missingSlots = ['Frühstück', 'Mittag', 'Snack', 'Abend'].filter(
+      slot => !mealsBySlot.find(m => m.slot === slot)
+    );
+    const remaining = target + burned - consumed;
+    const dateLabel = analysisDateKey === todayKey() ? 'heute' : (isFuture ? `am ${analysisDateKey} (Planung)` : `am ${analysisDateKey}`);
+    const userInfo = settings ? `Person: ${settings.sex === 'm' ? 'männlich' : 'weiblich'}, ${settings.age} Jahre, ${settings.height} cm, ${settings.weight} kg, Ziel: ${target} kcal/Tag.` : `Tagesziel: ${target} kcal.`;
 
-    const userInfo = settings ? `Person: ${settings.sex === 'm' ? 'männlich' : 'weiblich'}, ${settings.age} Jahre, ${settings.height} cm, ${settings.weight} kg, Tagesziel: ${target} kcal.` : `Tagesziel: ${target} kcal.`;
+    // Kontext-abhängige Anweisung
+    let aufgabe = '';
+    if (isEmpty && isFuture) {
+      aufgabe = `Der Tag ist noch komplett leer (Planung). Mache 2-3 konkrete Mahlzeit-Vorschläge für den ganzen Tag passend zum Kalorienziel. Gib für jeden Vorschlag ungefähre Mengen und kcal an.`;
+    } else if (isEmpty) {
+      aufgabe = `Heute ist noch gar nichts eingetragen. Mache 2-3 konkrete Mahlzeit-Vorschläge für den Rest des Tages passend zum Kalorienziel. Gib für jeden Vorschlag ungefähre Mengen und kcal an.`;
+    } else if (missingSlots.includes('Abend') && !isFuture && remaining > 100) {
+      aufgabe = `Das Abendessen fehlt noch. Es verbleiben ${remaining} kcal. Bewerte kurz den bisherigen Tag (Makros, Verteilung) und mache dann 2 konkrete Abendessen-Vorschläge die gut in die verbleibenden Kalorien passen. Gib Mengen und kcal an.`;
+    } else if (isFuture) {
+      aufgabe = `Das ist eine Tagesplanung. Bewerte die geplanten Mahlzeiten und ergänze 1-2 Vorschläge für fehlende Slots: ${missingSlots.join(', ') || 'alle geplant'}. Achte auf ausgewogene Makros.`;
+    } else if (remaining < 0) {
+      aufgabe = `Das Tagesziel wurde um ${Math.abs(remaining)} kcal überschritten. Sage was gut war, und gib einen pragmatischen Tipp ohne zu moralisieren.`;
+    } else {
+      aufgabe = `Bewerte den Tag: was war gut (Makros, Verteilung, Timing), was könnte besser sein. Gib einen konkreten Tipp für morgen.`;
+    }
 
-    const prompt = `Du bist ein freundlicher Ernährungs-Coach. Analysiere kurz und konkret den folgenden Tag (${dateLabel}). Sprich den Nutzer persönlich an (du). Antworte auf Deutsch in 4-6 Sätzen, ohne Listen oder Markdown. Gib eine ehrliche Einschätzung der Mahlzeitenverteilung und Makros, und ${isFuture ? 'mache 1-2 konkrete Vorschläge was noch gut zum Tag passen würde' : 'gib einen konkreten Tipp für den nächsten Tag oder die Restkalorien'}. Bleibe pragmatisch, keine Predigten.
+    const prompt = `Du bist ein pragmatischer Ernährungs-Coach. Sprich den Nutzer persönlich an (du). Antworte auf Deutsch, max. 6 Sätze, kein Markdown, keine Listen — fließender Text. Keine Predigten, keine Phrasen wie "gut gemacht" oder "super".
 
 ${userInfo}
 
-Aufgenommen: ${consumed} kcal (E ${Math.round(macroSums.protein)}g, KH ${Math.round(macroSums.carbs)}g, F ${Math.round(macroSums.fat)}g)
-Verbrannt durch Sport: ${burned} kcal
-Effektiv: ${consumed - burned} kcal von ${target} möglich
-Verbleibend: ${target + burned - consumed} kcal
+Tag: ${dateLabel}
+Aufgenommen: ${consumed} kcal (Eiweiß ${Math.round(macroSums.protein)}g · KH ${Math.round(macroSums.carbs)}g · Fett ${Math.round(macroSums.fat)}g)
+Sport: ${burned > 0 ? `${burned} kcal verbrannt` : 'keiner'}
+Netto: ${consumed - burned} kcal von ${target} kcal Ziel
+Verbleibend: ${remaining} kcal
 
 Mahlzeiten:
-${mealsBySlot.length > 0 ? mealsBySlot.map(m => `${m.slot}: ${m.items.join(', ')}`).join('\n') : 'noch nichts eingetragen'}
+${mealsBySlot.length > 0 ? mealsBySlot.map(m => `${m.slot}: ${m.items.join(' | ')}`).join('\n') : 'noch nichts eingetragen'}
 
-Aktivitäten: ${activitiesText}`;
+Aktivitäten: ${activitiesText}
+
+Aufgabe: ${aufgabe}`;
 
     try {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -4298,7 +4321,7 @@ Aktivitäten: ${activitiesText}`;
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 600,
+          max_tokens: 800,
           messages: [{ role: 'user', content: prompt }],
         }),
       });
@@ -4830,7 +4853,16 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
             inputMode="numeric"
             min="1" max="20"
             value={waterGoal}
-            onChange={e => onWaterGoalChange(Math.max(1, Math.min(20, parseInt(e.target.value) || 8)))}
+            onChange={e => {
+              const v = e.target.value;
+              if (v === '') { onWaterGoalChange(v); return; } // leeres Feld erlauben
+              const n = parseInt(v);
+              if (!isNaN(n)) onWaterGoalChange(Math.max(1, Math.min(20, n)));
+            }}
+            onBlur={e => {
+              const n = parseInt(e.target.value);
+              if (isNaN(n) || n < 1) onWaterGoalChange(8); // Fallback auf 8
+            }}
             style={{ ...styles.input, width: 80, textAlign: 'center' }}
           />
           <span style={{ fontFamily: 'Inter', fontSize: 14, color: '#5C6B5E' }}>Gläser à {WATER_ML}ml = {waterGoal * WATER_ML}ml</span>
