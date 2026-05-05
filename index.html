@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.16';
+const APP_VERSION = '3.17';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -603,6 +603,7 @@ function App() {
   const [notes, setNotes] = useState('');
   const [coffeeLog, setCoffeeLog] = useState({}); // { 'YYYY-MM-DD': count }
   const [waterLog, setWaterLog] = useState({});   // { 'YYYY-MM-DD': count }
+  const [waterGoal, setWaterGoal] = useState(8);
   const [apiKey, setApiKey] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [selectedDate, setSelectedDate] = useState(todayKey());
@@ -751,6 +752,7 @@ function App() {
       const sav = await loadKey('savedAnalyses', []);
       const cof = await loadKey('coffeeLog', {});
       const wat = await loadKey('waterLog', {});
+      const wg = await loadKey('waterGoal', 8);
       setSettings(s);
       setGlossary(g);
       setDishes(d);
@@ -764,6 +766,7 @@ function App() {
       setSavedAnalyses(sav);
       setCoffeeLog(cof);
       setWaterLog(wat);
+      setWaterGoal(wg);
       setLoaded(true);
       if (!s) setView('setup');
     })();
@@ -778,6 +781,7 @@ function App() {
   const persistSavedAnalyses = async (next) => { setSavedAnalyses(next); await saveKey('savedAnalyses', next); };
   const persistCoffeeLog = async (next) => { setCoffeeLog(next); await saveKey('coffeeLog', next); };
   const persistWaterLog = async (next) => { setWaterLog(next); await saveKey('waterLog', next); };
+  const persistWaterGoal = async (next) => { setWaterGoal(next); await saveKey('waterGoal', next); };
   const persistActivityEntries = async (next) => { setActivityEntries(next); await saveKey('activityEntries', next); };
   const persistSettings = async (next) => { setSettings(next); await saveKey('settings', next); };
   const persistApiKey = async (next) => { setApiKey(next); await saveKey('apiKey', next); };
@@ -856,7 +860,27 @@ function App() {
         .num { font-variant-numeric: tabular-nums; }
       `}</style>
 
-      {view === 'setup' && <Setup onSave={async (s) => { await persistSettings(s); setView('today'); }} />}
+      {view === 'setup' && (
+        <Setup
+          onSave={async (s) => { await persistSettings(s); setView('today'); }}
+          onSkip={() => setView('today')}
+          onImport={async (data) => {
+            if (data.settings) await persistSettings(data.settings);
+            if (data.glossary) await persistGlossary(data.glossary);
+            if (data.dishes) await persistDishes(data.dishes);
+            if (data.weights) await persistWeights(data.weights);
+            if (data.activities) await persistActivities(data.activities);
+            if (data.workouts) await persistWorkouts(data.workouts);
+            if (data.activityEntries) await persistActivityEntries(data.activityEntries);
+            if (data.entries) await persistEntries(data.entries);
+            if (data.notes != null) await persistNotes(data.notes);
+            if (data.savedAnalyses) await persistSavedAnalyses(data.savedAnalyses);
+            if (data.coffeeLog) await persistCoffeeLog(data.coffeeLog);
+            if (data.waterLog) await persistWaterLog(data.waterLog);
+            setView('today');
+          }}
+        />
+      )}
 
       {view === 'today' && settings && (
         <Today
@@ -933,6 +957,40 @@ function App() {
             const prev = waterLog[date] || 0;
             if (prev <= 0) return;
             await persistWaterLog({ ...waterLog, [date]: prev - 1 });
+          }}
+          waterGoal={waterGoal}
+          onExportDay={() => {
+            const date = selectedDate;
+            const dayEntries = entries.filter(e => e.dateKey === date && !e.isCoffee);
+            const dayActs = activityEntries.filter(a => a.dateKey === date);
+            const consumed = dayEntries.reduce((s, e) => s + e.kcal, 0);
+            const burned = dayActs.reduce((s, a) => s + a.kcal, 0);
+            const protein = dayEntries.reduce((s, e) => s + (e.protein || 0), 0);
+            const carbs = dayEntries.reduce((s, e) => s + (e.carbs || 0), 0);
+            const fat = dayEntries.reduce((s, e) => s + (e.fat || 0), 0);
+            const slots = ['Frühstück', 'Mittag', 'Snack', 'Abend'];
+            const slotLines = slots.map(slot => {
+              const items = dayEntries.filter(e => e.slot === slot);
+              if (!items.length) return null;
+              return `**${slot}** (${items.reduce((s,e) => s+e.kcal,0)} kcal)\n` +
+                items.map(e => `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`).join('\n');
+            }).filter(Boolean).join('\n\n');
+            const actLines = dayActs.length
+              ? `**Bewegung**\n` + dayActs.map(a => `  - ${a.activityName}: ${a.durationMin} min → +${a.kcal} kcal`).join('\n')
+              : '';
+            const text = `# Torcal Tagesexport — ${date}\n\n` +
+              `**Tagesziel:** ${dailyTarget} kcal\n` +
+              `**Gegessen:** ${consumed} kcal\n` +
+              `**Verbrannt:** ${burned} kcal\n` +
+              `**Netto:** ${consumed - burned} kcal\n` +
+              `**Verbleibend:** ${dailyTarget + burned - consumed} kcal\n\n` +
+              `**Makros:** Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n` +
+              slotLines + (actLines ? '\n\n' + actLines : '');
+            navigator.clipboard.writeText(text).then(() => {
+              alert('Tagesübersicht kopiert! Einfach hier in den Chat einfügen.');
+            }).catch(() => {
+              alert(text);
+            });
           }}
           onDelete={async (id) => {
             const deleted = entries.find(e => e.id === id);
@@ -1162,6 +1220,8 @@ function App() {
           activityEntries={activityEntries}
           notes={notes}
           onNotesChange={persistNotes}
+          waterGoal={waterGoal}
+          onWaterGoalChange={persistWaterGoal}
           savedAnalyses={savedAnalyses}
           apiKey={apiKey}
           onApiKeyChange={persistApiKey}
@@ -1239,14 +1299,57 @@ function App() {
 }
 
 // === Setup ===
-function Setup({ onSave }) {
+function Setup({ onSave, onImport, onSkip }) {
   const [s, setS] = useState({ sex: 'm', age: '', height: '', weight: '', activity: 'light', goal: 'maintain' });
   const valid = s.age && s.height && s.weight;
   const target = valid ? calcDailyKcal({ ...s, age: +s.age, height: +s.height, weight: +s.weight }) : null;
+
+  const handleImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        onImport(data);
+      } catch {
+        alert('Ungültige Backup-Datei.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div style={{ ...styles.page, paddingBottom: 40 }}>
       <h1 style={styles.h1}>Einrichtung</h1>
       <p style={styles.sub}>Einmalig. Kannst du später ändern.</p>
+
+      {/* Import + Überspringen oben */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+        <label style={{
+          flex: 1, textAlign: 'center',
+          background: 'rgba(250,246,236,0.12)', color: '#FAF6EC',
+          border: '1px solid rgba(250,246,236,0.25)', borderRadius: 10,
+          padding: '12px 14px', fontFamily: 'Inter', fontSize: 13, fontWeight: 600,
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}>
+          📦 Backup importieren
+          <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
+        </label>
+        <button
+          onClick={onSkip}
+          style={{
+            flex: 1, background: 'transparent', color: 'rgba(250,246,236,0.6)',
+            border: '1px solid rgba(250,246,236,0.15)', borderRadius: 10,
+            padding: '12px 14px', fontFamily: 'Inter', fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          Überspringen →
+        </button>
+      </div>
+
+      <div style={{ height: 1, background: 'rgba(250,246,236,0.1)', marginBottom: 20 }} />
 
       <Field label="Geschlecht">
         <div style={styles.segGroup}>
@@ -1522,7 +1625,7 @@ function ActivityEditor({ entry, activities, currentWeight, onSave, onDelete, on
   );
 }
 
-function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove }) {
+function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay }) {
   const isToday = selectedDate === todayKey();
   const netConsumed = Math.max(0, consumed - burned);
   const pct = Math.min(100, (netConsumed / target) * 100);
@@ -1747,6 +1850,18 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
             Auswertung →
           </button>
           <button
+            onClick={onExportDay}
+            style={{
+              background: 'rgba(250,246,236,0.08)', color: 'rgba(250,246,236,0.85)',
+              border: '1px solid rgba(250,246,236,0.18)', borderRadius: 6,
+              padding: '6px 12px', fontFamily: 'Inter', fontSize: 11, fontWeight: 600,
+              textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
+            }}
+            title="Tag kopieren für Chat"
+          >
+            📋 Tag teilen
+          </button>
+          <button
             onClick={toggleCompact}
             style={{
               background: compact ? 'rgba(250,246,236,0.18)' : 'rgba(250,246,236,0.08)',
@@ -1755,7 +1870,6 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
               padding: '6px 12px', fontFamily: 'Inter', fontSize: 11, fontWeight: 600,
               textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
             }}
-            title={compact ? 'Normale Ansicht' : 'Kompakt-Ansicht'}
           >
             {compact ? '☰ Normal' : '☰ Kompakt'}
           </button>
@@ -2019,8 +2133,8 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
             <span style={{ fontSize: 20, flexShrink: 0 }}>💧</span>
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Wasser</div>
-              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: waterCount >= WATER_GOAL ? '#90C8A8' : '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
-                {waterCount}/{WATER_GOAL} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{WATER_ML}ml</span>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: waterCount >= waterGoal ? '#90C8A8' : '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
+                {waterCount}/{waterGoal}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
@@ -2182,6 +2296,104 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
           onCancel={() => setEditingActivity(null)}
         />
       )}
+    </div>
+  );
+}
+
+// === ImageCropper: Zuschneiden vor Analyse ===
+function ImageCropper({ imageDataUrl, onCrop, onCancel }) {
+  const canvasRef = useRef(null);
+  const [crop, setCrop] = useState({ x: 10, y: 10, w: 80, h: 80 }); // in Prozent
+  const [dragging, setDragging] = useState(null); // null | 'move' | 'br'
+  const [startPos, setStartPos] = useState(null);
+  const imgRef = useRef(null);
+
+  const onTouchStart = (e, type) => {
+    e.stopPropagation();
+    const t = e.touches[0];
+    setDragging(type);
+    setStartPos({ x: t.clientX, y: t.clientY, crop: { ...crop } });
+  };
+
+  const onTouchMove = (e) => {
+    if (!dragging || !startPos) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const dx = (t.clientX - startPos.x) / rect.width * 100;
+    const dy = (t.clientY - startPos.y) / rect.height * 100;
+    if (dragging === 'move') {
+      setCrop(prev => ({
+        ...prev,
+        x: Math.max(0, Math.min(100 - startPos.crop.w, startPos.crop.x + dx)),
+        y: Math.max(0, Math.min(100 - startPos.crop.h, startPos.crop.y + dy)),
+      }));
+    } else if (dragging === 'br') {
+      setCrop(prev => ({
+        ...prev,
+        w: Math.max(10, Math.min(100 - startPos.crop.x, startPos.crop.w + dx)),
+        h: Math.max(10, Math.min(100 - startPos.crop.y, startPos.crop.h + dy)),
+      }));
+    }
+  };
+
+  const onTouchEnd = () => { setDragging(null); setStartPos(null); };
+
+  const doCrop = () => {
+    const img = imgRef.current;
+    if (!img) return;
+    const canvas = document.createElement('canvas');
+    const sx = img.naturalWidth * crop.x / 100;
+    const sy = img.naturalHeight * crop.y / 100;
+    const sw = img.naturalWidth * crop.w / 100;
+    const sh = img.naturalHeight * crop.h / 100;
+    const MAX = 1024;
+    let ow = sw, oh = sh;
+    if (ow > MAX || oh > MAX) { const s = MAX / Math.max(ow, oh); ow = Math.round(ow*s); oh = Math.round(oh*s); }
+    canvas.width = ow; canvas.height = oh;
+    canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, ow, oh);
+    const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+    onCrop(base64, 'image/jpeg');
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 200, display: 'flex', flexDirection: 'column' }}
+      onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}
+        ref={canvasRef}>
+        <img ref={imgRef} src={imageDataUrl} alt="crop"
+          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+        {/* Overlay */}
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
+          background: `linear-gradient(rgba(0,0,0,0.5) ${crop.y}%, transparent ${crop.y}%, transparent ${crop.y+crop.h}%, rgba(0,0,0,0.5) ${crop.y+crop.h}%)` }} />
+        {/* Crop-Rahmen */}
+        <div
+          onTouchStart={e => onTouchStart(e, 'move')}
+          style={{
+            position: 'absolute',
+            left: crop.x + '%', top: crop.y + '%',
+            width: crop.w + '%', height: crop.h + '%',
+            border: '2px solid #FAF6EC',
+            boxSizing: 'border-box',
+            touchAction: 'none',
+          }}>
+          {/* Ecke zum Skalieren */}
+          <div onTouchStart={e => onTouchStart(e, 'br')} style={{
+            position: 'absolute', right: -8, bottom: -8,
+            width: 24, height: 24, background: '#FAF6EC', borderRadius: 4,
+            touchAction: 'none',
+          }} />
+        </div>
+      </div>
+      <div style={{ padding: '16px 24px', display: 'flex', gap: 12, background: 'rgba(0,0,0,0.8)' }}>
+        <button onClick={onCancel} style={{ flex: 1, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, color: '#FAF6EC', padding: 14, fontFamily: 'Inter', fontSize: 14, cursor: 'pointer' }}>
+          Abbrechen
+        </button>
+        <button onClick={doCrop} style={{ flex: 2, background: '#FAF6EC', border: 'none', borderRadius: 8, color: '#0D3B2E', padding: 14, fontFamily: 'Inter', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+          ✓ Analysieren
+        </button>
+      </div>
     </div>
   );
 }
@@ -2401,6 +2613,7 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
   const recognitionRef = useRef(null);
 
   const [showCamera, setShowCamera] = useState(false);
+  const [cropImageUrl, setCropImageUrl] = useState(null); // zeigt Cropper
 
   const handlePhotoBase64 = async (base64, mediaType) => {
     setShowCamera(false);
@@ -2432,30 +2645,24 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
     }
   };
 
-  const handlePhotoSelect = async (e) => {
+  const handleCameraCapture = (base64, mediaType) => {
+    setShowCamera(false);
+    // Erst Cropper zeigen
+    setCropImageUrl('data:' + mediaType + ';base64,' + base64);
+  };
+
+  const handleGallerySelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!apiKey) { setPhotoError('Für die Foto-Analyse brauchst du einen API-Key (Mehr → API-Key).'); return; }
-    const base64 = await new Promise((resolve, reject) => {
+    const dataUrl = await new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = (ev) => {
-        const img = new Image();
-        img.onload = () => {
-          const MAX = 1024;
-          let w = img.width, h = img.height;
-          if (w > MAX || h > MAX) { const s = MAX / Math.max(w, h); w = Math.round(w*s); h = Math.round(h*s); }
-          const canvas = document.createElement('canvas');
-          canvas.width = w; canvas.height = h;
-          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
-        };
-        img.onerror = reject;
-        img.src = ev.target.result;
-      };
+      reader.onload = ev => resolve(ev.target.result);
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
-    await handlePhotoBase64(base64, 'image/jpeg');
+    setCropImageUrl(dataUrl);
+    if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
   const handleBarcodeResult = async (code) => {
@@ -3003,14 +3210,26 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
             id="photo-gallery-input"
             type="file"
             accept="image/*"
-            onChange={handlePhotoSelect}
+            onChange={handleGallerySelect}
             style={{ display: 'none' }}
           />
+
+          {/* ImageCropper nach Aufnahme */}
+          {cropImageUrl && (
+            <ImageCropper
+              imageDataUrl={cropImageUrl}
+              onCrop={(base64, mediaType) => {
+                setCropImageUrl(null);
+                handlePhotoBase64(base64, mediaType);
+              }}
+              onCancel={() => setCropImageUrl(null)}
+            />
+          )}
 
           {/* CameraCapture Overlay */}
           {showCamera && (
             <CameraCapture
-              onCapture={handlePhotoBase64}
+              onCapture={handleCameraCapture}
               onCancel={() => setShowCamera(false)}
             />
           )}
@@ -3034,10 +3253,7 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
               <button
                 onClick={() => document.getElementById('photo-gallery-input')?.click()}
                 disabled={!apiKey || photoAnalyzing}
-                style={{
-                  ...styles.secondary,
-                  opacity: !apiKey || photoAnalyzing ? 0.5 : 1,
-                }}
+                style={{ ...styles.secondary, opacity: !apiKey || photoAnalyzing ? 0.5 : 1 }}
               >
                 🖼️ Aus Galerie wählen
               </button>
@@ -4508,7 +4724,7 @@ function WeightChart({ weights }) {
 }
 
 // === Settings ===
-function SettingsView({ settings, entries, glossary, dishes = [], weights = [], activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], apiKey = '', onApiKeyChange, onSave, onBack, onImport }) {
+function SettingsView({ settings, entries, glossary, dishes = [], weights = [], activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, apiKey = '', onApiKeyChange, onSave, onBack, onImport }) {
   const [s, setS] = useState(settings);
   const [keyInput, setKeyInput] = useState(apiKey);
   const [keyVisible, setKeyVisible] = useState(false);
@@ -4604,6 +4820,21 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
             ✓ Aktiv – KI-Suche steht bereit
           </div>
         )}
+      </div>
+
+      <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
+        <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E', marginBottom: 10 }}>Wasser-Tagesziel</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <input
+            type="number"
+            inputMode="numeric"
+            min="1" max="20"
+            value={waterGoal}
+            onChange={e => onWaterGoalChange(Math.max(1, Math.min(20, parseInt(e.target.value) || 8)))}
+            style={{ ...styles.input, width: 80, textAlign: 'center' }}
+          />
+          <span style={{ fontFamily: 'Inter', fontSize: 14, color: '#5C6B5E' }}>Gläser à {WATER_ML}ml = {waterGoal * WATER_ML}ml</span>
+        </div>
       </div>
 
       <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
