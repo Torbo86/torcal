@@ -856,27 +856,7 @@ function App() {
         .num { font-variant-numeric: tabular-nums; }
       `}</style>
 
-      {view === 'setup' && (
-        <Setup
-          onSave={async (s) => { await persistSettings(s); setView('today'); }}
-          onSkip={() => setView('today')}
-          onImport={async (data) => {
-            if (data.settings) await persistSettings(data.settings);
-            if (data.glossary) await persistGlossary(data.glossary);
-            if (data.dishes) await persistDishes(data.dishes);
-            if (data.weights) await persistWeights(data.weights);
-            if (data.activities) await persistActivities(data.activities);
-            if (data.workouts) await persistWorkouts(data.workouts);
-            if (data.activityEntries) await persistActivityEntries(data.activityEntries);
-            if (data.entries) await persistEntries(data.entries);
-            if (data.notes != null) await persistNotes(data.notes);
-            if (data.savedAnalyses) await persistSavedAnalyses(data.savedAnalyses);
-            if (data.coffeeLog) await persistCoffeeLog(data.coffeeLog);
-            if (data.waterLog) await persistWaterLog(data.waterLog);
-            setView('today');
-          }}
-        />
-      )}
+      {view === 'setup' && <Setup onSave={async (s) => { await persistSettings(s); setView('today'); }} />}
 
       {view === 'today' && settings && (
         <Today
@@ -1259,57 +1239,14 @@ function App() {
 }
 
 // === Setup ===
-function Setup({ onSave, onImport, onSkip }) {
+function Setup({ onSave }) {
   const [s, setS] = useState({ sex: 'm', age: '', height: '', weight: '', activity: 'light', goal: 'maintain' });
   const valid = s.age && s.height && s.weight;
   const target = valid ? calcDailyKcal({ ...s, age: +s.age, height: +s.height, weight: +s.weight }) : null;
-
-  const handleImport = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        onImport(data);
-      } catch {
-        alert('Ungültige Backup-Datei.');
-      }
-    };
-    reader.readAsText(file);
-  };
-
   return (
     <div style={{ ...styles.page, paddingBottom: 40 }}>
       <h1 style={styles.h1}>Einrichtung</h1>
       <p style={styles.sub}>Einmalig. Kannst du später ändern.</p>
-
-      {/* Import + Überspringen oben */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-        <label style={{
-          flex: 1, textAlign: 'center',
-          background: 'rgba(250,246,236,0.12)', color: '#FAF6EC',
-          border: '1px solid rgba(250,246,236,0.25)', borderRadius: 10,
-          padding: '12px 14px', fontFamily: 'Inter', fontSize: 13, fontWeight: 600,
-          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-        }}>
-          📦 Backup importieren
-          <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
-        </label>
-        <button
-          onClick={onSkip}
-          style={{
-            flex: 1, background: 'transparent', color: 'rgba(250,246,236,0.6)',
-            border: '1px solid rgba(250,246,236,0.15)', borderRadius: 10,
-            padding: '12px 14px', fontFamily: 'Inter', fontSize: 13,
-            cursor: 'pointer',
-          }}
-        >
-          Überspringen →
-        </button>
-      </div>
-
-      <div style={{ height: 1, background: 'rgba(250,246,236,0.1)', marginBottom: 20 }} />
 
       <Field label="Geschlecht">
         <div style={styles.segGroup}>
