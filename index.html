@@ -1706,8 +1706,8 @@ function ActivityEditor({ entry, activities, currentWeight, onSave, onDelete, on
 function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay }) {
   const isToday = selectedDate === todayKey();
   const netConsumed = Math.max(0, consumed - burned);
-  const pct = Math.min(100, (netConsumed / target) * 100);
-  const over = netConsumed > target;
+  const pct = Math.min(100, (consumed / target) * 100); // Balken = gegessen (brutto)
+  const over = consumed > target + burned; // überschritten = gegessen > ziel + sport
 
   // Makro-Summen (Kaffee-Einträge ausschließen)
   const totals = entries.filter(e => !e.isCoffee).reduce((acc, e) => ({
@@ -1730,12 +1730,6 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
     try { return JSON.parse(localStorage.getItem('torcal_compact') || 'false'); } catch { return false; }
   });
   const [collapsedSlots, setCollapsedSlots] = useState(new Set()); // leere Set = alle offen
-
-  const toggleCompact = () => {
-    const next = !compact;
-    setCompact(next);
-    try { localStorage.setItem('torcal_compact', JSON.stringify(next)); } catch {}
-  };
 
   const toggleSlot = (slot) => {
     setCollapsedSlots(prev => {
@@ -1881,7 +1875,7 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
           {Math.abs(remaining)}
         </div>
         <div style={{ fontFamily: 'Inter', fontSize: 14, color: 'rgba(250,246,236,0.6)', marginTop: 6 }} className="num">
-          {netConsumed} von {target} kcal{burned > 0 ? ' (netto)' : ''}
+          {consumed} von {target} kcal{burned > 0 ? ` · netto ${netConsumed}` : ''}
         </div>
 
         <div style={{ height: 6, background: 'rgba(10,46,34,0.5)', borderRadius: 3, marginTop: 20, overflow: 'hidden' }}>
@@ -1922,13 +1916,6 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
             padding: '6px 14px', fontFamily: 'Inter', fontSize: 11, fontWeight: 600,
             textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
           }}>Auswertung →</button>
-          <button onClick={toggleCompact} style={{
-            background: compact ? 'rgba(250,246,236,0.18)' : 'rgba(250,246,236,0.08)',
-            color: 'rgba(250,246,236,0.85)',
-            border: '1px solid rgba(250,246,236,0.18)', borderRadius: 6,
-            padding: '6px 12px', fontFamily: 'Inter', fontSize: 11, fontWeight: 600,
-            textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
-          }}>{compact ? '☰ Normal' : '☰ Kompakt'}</button>
         </div>
       </div>
 
@@ -4823,6 +4810,36 @@ function WeightChart({ weights }) {
   );
 }
 
+// === CompactToggle ===
+function CompactToggle() {
+  const [compact, setCompact] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('torcal_compact') || 'false'); } catch { return false; }
+  });
+  const toggle = () => {
+    const next = !compact;
+    setCompact(next);
+    try { localStorage.setItem('torcal_compact', JSON.stringify(next)); } catch {}
+  };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <span style={{ fontFamily: 'Inter', fontSize: 14, color: '#5C6B5E' }}>
+        {compact ? 'Kompakt-Ansicht' : 'Normal-Ansicht'}
+      </span>
+      <button
+        onClick={toggle}
+        style={{
+          background: compact ? '#1A5340' : 'rgba(13,59,46,0.08)',
+          border: '1px solid rgba(13,59,46,0.2)', borderRadius: 20,
+          padding: '6px 16px', fontFamily: 'Inter', fontSize: 12, fontWeight: 600,
+          color: compact ? '#FAF6EC' : '#5C6B5E', cursor: 'pointer',
+        }}
+      >
+        {compact ? '☰ Kompakt' : '☰ Normal'}
+      </button>
+    </div>
+  );
+}
+
 // === ApiStatus ===
 function ApiStatus({ apiKey }) {
   const [status, setStatus] = useState(null);
@@ -4963,8 +4980,25 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
           API-Key speichern
         </button>
         {apiKey && (
-          <ApiStatus apiKey={apiKey} />
+          <div style={{ marginTop: 8, textAlign: 'center' }}>
+            <a
+              href="https://console.anthropic.com/settings/billing"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontFamily: 'Inter', fontSize: 12, color: '#1A5340',
+                textDecoration: 'underline', cursor: 'pointer',
+              }}
+            >
+              🔗 Guthaben prüfen (console.anthropic.com)
+            </a>
+          </div>
         )}
+      </div>
+
+      <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
+        <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E', marginBottom: 10 }}>Ansicht</div>
+        <CompactToggle />
       </div>
 
       <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
