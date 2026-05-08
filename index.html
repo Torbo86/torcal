@@ -131,11 +131,13 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.18';
+const APP_VERSION = '3.19';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
 const WATER_GOAL = 8;   // Gläser pro Tag
+const BEER_KCAL = 145;  // 330ml Bier
+const WINE_KCAL = 170;  // 200ml Wein
 
 const todayKey = (d = new Date()) => d.toISOString().slice(0, 10);
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -481,34 +483,58 @@ Regeln:
   const clean = text.replace(/```json|```/g, '').trim();
   return JSON.parse(clean);
 };
+
+// Übersetzungstabelle DE→EN für bessere OFF-Suche
+const DE_EN = {
+  'haferflocken':'oats','hafer':'oats','milch':'milk','vollmilch':'whole milk',
+  'magermilch':'skim milk','butter':'butter','käse':'cheese','joghurt':'yogurt',
+  'magerquark':'quark','quark':'quark','ei':'egg','eier':'eggs','brot':'bread',
+  'vollkornbrot':'whole grain bread','nudeln':'pasta','reis':'rice','kartoffeln':'potatoes',
+  'apfel':'apple','banane':'banana','tomate':'tomato','gurke':'cucumber',
+  'hähnchen':'chicken','hühnchen':'chicken','rindfleisch':'beef','schweinefleisch':'pork',
+  'lachs':'salmon','thunfisch':'tuna','linsen':'lentils','kichererbsen':'chickpeas',
+  'mandeln':'almonds','walnüsse':'walnuts','nüsse':'nuts','olivenöl':'olive oil',
+  'zucker':'sugar','mehl':'flour','schokolade':'chocolate','erdbeeren':'strawberries',
+  'himbeeren':'raspberries','blaubeeren':'blueberries','spinat':'spinach',
+  'brokkoli':'broccoli','karotten':'carrots','möhren':'carrots','zwiebeln':'onions',
+  'knoblauch':'garlic','paprika':'bell pepper','salat':'lettuce','gurken':'cucumber',
+};
+
 const lookupOpenFoodFactsMany = async (name, pageSize = 15) => {
-  try {
-    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(name)}&search_simple=1&action=process&json=1&page_size=${pageSize}&lc=de`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!data.products || data.products.length === 0) return [];
-    const results = data.products
-      .filter(p => p.nutriments && (p.nutriments['energy-kcal_100g'] || p.nutriments['energy-kcal']))
-      .map(p => {
+  const nameLower = name.toLowerCase().trim();
+  const searchTerms = [name];
+  // EN-Übersetzung hinzufügen
+  for (const [de, en] of Object.entries(DE_EN)) {
+    if (nameLower.includes(de)) { if (!searchTerms.includes(en)) searchTerms.push(en); break; }
+  }
+  const results = [];
+  const seen = new Set();
+  await Promise.all(searchTerms.map(async term => {
+    try {
+      const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=${pageSize}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data.products) return;
+      for (const p of data.products) {
         const n = p.nutriments;
+        if (!n) continue;
         const kcal = n['energy-kcal_100g'] || n['energy-kcal'];
-        if (!kcal || kcal < 1) return null;
-        return {
-          source: 'OpenFoodFacts',
-          name: p.product_name_de || p.product_name || name,
-          brand: p.brands || null,
+        if (!kcal || kcal < 1) continue;
+        const pname = p.product_name_de || p.product_name || term;
+        const key = pname.toLowerCase().slice(0, 20);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push({
+          source: 'OpenFoodFacts', name: pname, brand: p.brands || null,
           kcalPer100g: Math.round(kcal),
           protein: n.proteins_100g != null ? Math.round(n.proteins_100g * 10) / 10 : 0,
           carbs: n.carbohydrates_100g != null ? Math.round(n.carbohydrates_100g * 10) / 10 : 0,
           fat: n.fat_100g != null ? Math.round(n.fat_100g * 10) / 10 : 0,
-        };
-      })
-      .filter(Boolean);
-    return results;
-  } catch (e) {
-    console.warn('OFF many lookup failed', e);
-    return [];
-  }
+        });
+      }
+    } catch {}
+  }));
+  return results.slice(0, pageSize);
 };
 
 const lookupClaude = async (name, apiKey) => {
@@ -589,7 +615,8 @@ const saveKey = async (key, value) => {
 function App() {
   const [view, setView] = useState('today'); // today | input | glossary | dishes | stats | timer | settings | setup | movement
   const [inputMode, setInputMode] = useState('text');
-  const [inputScreen, setInputScreen] = useState('food'); // food | movement
+  const [inputScreen, setInputScreen] = useState('food');
+  const [inputSlot, setInputSlot] = useState(null); // food | movement
   const [undoAction, setUndoAction] = useState(null); // {label, restore, expiresAt}
   const [settings, setSettings] = useState(null);
   const [glossary, setGlossary] = useState([]);
@@ -604,6 +631,10 @@ function App() {
   const [coffeeLog, setCoffeeLog] = useState({}); // { 'YYYY-MM-DD': count }
   const [waterLog, setWaterLog] = useState({});   // { 'YYYY-MM-DD': count }
   const [waterGoal, setWaterGoal] = useState(8);
+  const [alcoholLog, setAlcoholLog] = useState({}); // { 'YYYY-MM-DD': { beer: n, wine: n } }
+  const [intimacyLog, setIntimacyLog] = useState([]); // [{id, date, note}]
+  const [showAlcohol, setShowAlcohol] = useState(false); // in Einstellungen aktivierbar
+  const [showIntimacy, setShowIntimacy] = useState(false); // versteckt aktivierbar
   const [apiKey, setApiKey] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [selectedDate, setSelectedDate] = useState(todayKey());
@@ -753,6 +784,10 @@ function App() {
       const cof = await loadKey('coffeeLog', {});
       const wat = await loadKey('waterLog', {});
       const wg = await loadKey('waterGoal', 8);
+      const alc = await loadKey('alcoholLog', {});
+      const intim = await loadKey('intimacyLog', []);
+      const showAlc = await loadKey('showAlcohol', false);
+      const showInt = await loadKey('showIntimacy', false);
       setSettings(s);
       setGlossary(g);
       setDishes(d);
@@ -767,6 +802,10 @@ function App() {
       setCoffeeLog(cof);
       setWaterLog(wat);
       setWaterGoal(wg);
+      setAlcoholLog(alc);
+      setIntimacyLog(intim);
+      setShowAlcohol(showAlc);
+      setShowIntimacy(showInt);
       setLoaded(true);
       if (!s) setView('setup');
     })();
@@ -782,6 +821,10 @@ function App() {
   const persistCoffeeLog = async (next) => { setCoffeeLog(next); await saveKey('coffeeLog', next); };
   const persistWaterLog = async (next) => { setWaterLog(next); await saveKey('waterLog', next); };
   const persistWaterGoal = async (next) => { setWaterGoal(next); await saveKey('waterGoal', next); };
+  const persistAlcoholLog = async (next) => { setAlcoholLog(next); await saveKey('alcoholLog', next); };
+  const persistIntimacyLog = async (next) => { setIntimacyLog(next); await saveKey('intimacyLog', next); };
+  const persistShowAlcohol = async (next) => { setShowAlcohol(next); await saveKey('showAlcohol', next); };
+  const persistShowIntimacy = async (next) => { setShowIntimacy(next); await saveKey('showIntimacy', next); };
   const persistActivityEntries = async (next) => { setActivityEntries(next); await saveKey('activityEntries', next); };
   const persistSettings = async (next) => { setSettings(next); await saveKey('settings', next); };
   const persistApiKey = async (next) => { setApiKey(next); await saveKey('apiKey', next); };
@@ -800,6 +843,23 @@ function App() {
   const swipeStateRef = useRef(null);
 
   // Aktuelles Gewicht: letzter Wiegen-Eintrag oder Setup-Gewicht
+  // Streak: aufeinanderfolgende Tage mit mind. einem Eintrag
+  const streak = (() => {
+    const today = todayKey();
+    let count = 0;
+    let d = new Date();
+    while (true) {
+      const key = todayKey(d);
+      const hasEntry = entries.some(e => e.dateKey === key) || activityEntries.some(a => a.dateKey === key);
+      if (!hasEntry && key !== today) break;
+      if (hasEntry) count++;
+      else if (key === today) { d.setDate(d.getDate() - 1); continue; }
+      d.setDate(d.getDate() - 1);
+      if (count > 365) break;
+    }
+    return count;
+  })();
+
   const currentWeight = (() => {
     if (weights.length === 0) return settings?.weight || 75;
     const sorted = [...weights].sort((a, b) => b.date.localeCompare(a.date));
@@ -860,14 +920,24 @@ function App() {
         .num { font-variant-numeric: tabular-nums; }
       `}</style>
 
-      {/* Logo-Header — sichtbar auf allen Tabs außer Setup/Input */}
+      {/* Logo-Header — langer Tipp (800ms) aktiviert versteckten Tracker */}
       {view !== 'setup' && view !== 'input' && (
         <div style={{
           padding: '12px 20px 8px',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           borderBottom: '1px solid rgba(250,246,236,0.08)',
         }}>
-          <span style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 700, color: '#FAF6EC', letterSpacing: 0.5 }}>
+          <span
+            style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 700, color: '#FAF6EC', letterSpacing: 0.5, userSelect: 'none', cursor: 'pointer' }}
+            onTouchStart={() => {
+              window._torcalLongPress = setTimeout(() => {
+                if (showIntimacy) setView('intimacy');
+                else { persistShowIntimacy(true); alert('Aktivitäts-Tracker freigeschaltet. Ab jetzt in der Auswertung sichtbar.'); }
+              }, 800);
+            }}
+            onTouchEnd={() => clearTimeout(window._torcalLongPress)}
+            onTouchCancel={() => clearTimeout(window._torcalLongPress)}
+          >
             Torcal
           </span>
         </div>
@@ -910,7 +980,7 @@ function App() {
           selectedDate={selectedDate}
           setSelectedDate={setSelectedDate}
           currentWeight={currentWeight}
-          onAdd={() => { setInputMode('text'); setInputScreen('food'); setView('input'); }}
+          onAdd={(slot) => { setInputMode('text'); setInputScreen('food'); setInputSlot(slot || null); setView('input'); }}
           onAddSpeech={() => { setInputMode('speech'); setInputScreen('food'); setView('input'); }}
           onAddMovement={() => { setInputScreen('movement'); setView('input'); }}
           onGoToStats={() => setView('stats')}
@@ -972,6 +1042,53 @@ function App() {
             await persistWaterLog({ ...waterLog, [date]: prev - 1 });
           }}
           waterGoal={waterGoal}
+          showAlcohol={showAlcohol}
+          alcoholDay={alcoholLog[selectedDate] || {}}
+          onAlcoholAdd={async (type) => {
+            const date = selectedDate;
+            const day = alcoholLog[date] || {};
+            const prev = day[type] || 0;
+            const newDay = { ...day, [type]: prev + 1 };
+            const newLog = { ...alcoholLog, [date]: newDay };
+            await persistAlcoholLog(newLog);
+            // Alkohol als kcal-Eintrag buchen
+            const kcal = type === 'beer' ? BEER_KCAL : WINE_KCAL;
+            const name = type === 'beer' ? `Bier ×${prev + 1}` : `Wein ×${prev + 1}`;
+            const existing = entries.find(e => e.dateKey === date && e.isAlcohol && e.alcoholType === type);
+            if (existing) {
+              await persistEntries(entries.map(e => e.id === existing.id
+                ? { ...e, qty: prev + 1, kcal: (prev + 1) * kcal, foodName: name }
+                : e));
+            } else {
+              await persistEntries([...entries, {
+                id: crypto.randomUUID(), dateKey: date, time: new Date().toISOString(),
+                foodId: `alcohol-${type}`, foodName: name,
+                qty: 1, unit: type === 'beer' ? '× 330ml' : '× 200ml',
+                kcal, protein: 0, carbs: type === 'beer' ? 13 : 4, fat: 0,
+                slot: 'Snack', isAlcohol: true, alcoholType: type,
+              }]);
+            }
+          }}
+          onAlcoholRemove={async (type) => {
+            const date = selectedDate;
+            const day = alcoholLog[date] || {};
+            const prev = day[type] || 0;
+            if (prev <= 0) return;
+            const newDay = { ...day, [type]: prev - 1 };
+            await persistAlcoholLog({ ...alcoholLog, [date]: newDay });
+            const kcal = type === 'beer' ? BEER_KCAL : WINE_KCAL;
+            const existing = entries.find(e => e.dateKey === date && e.isAlcohol && e.alcoholType === type);
+            if (!existing) return;
+            if (prev - 1 === 0) {
+              await persistEntries(entries.filter(e => e.id !== existing.id));
+            } else {
+              const newName = type === 'beer' ? `Bier ×${prev - 1}` : `Wein ×${prev - 1}`;
+              await persistEntries(entries.map(e => e.id === existing.id
+                ? { ...e, qty: prev - 1, kcal: (prev - 1) * kcal, foodName: newName }
+                : e));
+            }
+          }}
+          streak={streak}
           onExportDay={(deep = false) => {
             const date = selectedDate;
             const allDayEntries = entries.filter(e => e.dateKey === date); // alle inkl. Kaffee
@@ -1096,6 +1213,7 @@ function App() {
           initialMode={inputMode}
           initialScreen={inputScreen}
           initialDate={selectedDate}
+          initialSlot={inputSlot}
           apiKey={apiKey}
           pendingDishItems={pendingDishItems}
           onClearPending={() => setPendingDishItems(null)}
@@ -1230,6 +1348,20 @@ function App() {
         />
       )}
 
+      {view === 'intimacy' && (
+        <IntimacyView
+          log={intimacyLog}
+          weights={weights}
+          onAdd={async (entry) => {
+            await persistIntimacyLog([...intimacyLog, entry]);
+          }}
+          onDelete={async (id) => {
+            await persistIntimacyLog(intimacyLog.filter(e => e.id !== id));
+          }}
+          onBack={() => setView('today')}
+        />
+      )}
+
       {view === 'movement' && (
         <Movement
           activities={activities}
@@ -1300,6 +1432,8 @@ function App() {
           onNotesChange={persistNotes}
           waterGoal={waterGoal}
           onWaterGoalChange={persistWaterGoal}
+          showAlcohol={showAlcohol}
+          onShowAlcoholChange={persistShowAlcohol}
           savedAnalyses={savedAnalyses}
           apiKey={apiKey}
           onApiKeyChange={persistApiKey}
@@ -1377,6 +1511,106 @@ function App() {
 }
 
 // === Setup ===
+// === IntimacyView ===
+function IntimacyView({ log, weights, onAdd, onDelete, onBack }) {
+  const [addDate, setAddDate] = useState(todayKey());
+  const [note, setNote] = useState('');
+  const [showAll, setShowAll] = useState(false);
+
+  // Gruppieren nach Monat für Kalender-Heatmap
+  const dateSet = new Set(log.map(e => e.date));
+  const sorted = [...log].sort((a, b) => b.date.localeCompare(a.date));
+
+  // Monatliche Häufigkeit für Kurve
+  const monthlyData = (() => {
+    const months = {};
+    for (const e of log) {
+      const m = e.date.slice(0, 7);
+      months[m] = (months[m] || 0) + 1;
+    }
+    return Object.entries(months).sort(([a], [b]) => a.localeCompare(b)).slice(-12);
+  })();
+
+  const maxVal = Math.max(...monthlyData.map(([, v]) => v), 1);
+
+  return (
+    <div style={styles.page}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <button style={styles.iconBtn} onClick={onBack}><ChevronLeft size={20} /></button>
+        <h1 style={{ ...styles.h1, margin: 0, fontSize: 22 }}>Aktivitäten</h1>
+        <span style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.5)', marginLeft: 'auto' }}>
+          {log.length} gesamt
+        </span>
+      </div>
+
+      {/* Eintrag hinzufügen */}
+      <div style={{ background: '#FAF6EC', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E', marginBottom: 10 }}>Eintrag</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <input type="date" value={addDate} onChange={e => setAddDate(e.target.value)}
+            style={{ ...styles.input, flex: 1 }} />
+        </div>
+        <input value={note} onChange={e => setNote(e.target.value)}
+          placeholder="Notiz (optional)"
+          style={{ ...styles.input, marginBottom: 8 }} />
+        <button
+          onClick={async () => {
+            await onAdd({ id: crypto.randomUUID(), date: addDate, note: note.trim(), createdAt: new Date().toISOString() });
+            setNote('');
+            setAddDate(todayKey());
+          }}
+          style={styles.primary}
+        >
+          + Eintragen
+        </button>
+      </div>
+
+      {/* Monatliche Häufigkeit als Balken-Chart */}
+      {monthlyData.length > 0 && (
+        <div style={{ background: '#FAF6EC', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E', marginBottom: 12 }}>Häufigkeit</div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 80 }}>
+            {monthlyData.map(([month, count]) => (
+              <div key={month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <div style={{ fontFamily: 'Inter', fontSize: 9, color: '#5C6B5E' }} className="num">{count}</div>
+                <div style={{
+                  width: '100%', borderRadius: 3,
+                  background: '#1A5340',
+                  height: Math.max(4, (count / maxVal) * 60),
+                }} />
+                <div style={{ fontFamily: 'Inter', fontSize: 8, color: '#5C6B5E' }}>{month.slice(5)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Liste */}
+      {sorted.length > 0 && (
+        <div>
+          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'rgba(250,246,236,0.6)', marginBottom: 8 }}>Einträge</div>
+          {(showAll ? sorted : sorted.slice(0, 10)).map(e => (
+            <div key={e.id} style={{ display: 'flex', alignItems: 'center', background: '#FAF6EC', borderRadius: 8, padding: '10px 12px', marginBottom: 6 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: 'Fraunces', fontSize: 15, fontWeight: 500, color: '#0D3B2E' }}>{fmtDate(e.date)}</div>
+                {e.note && <div style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', marginTop: 2 }}>{e.note}</div>}
+              </div>
+              <button onClick={() => onDelete(e.id)} style={{ background: 'none', border: 'none', color: '#A03A35', cursor: 'pointer', padding: 4 }}>
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+          {sorted.length > 10 && !showAll && (
+            <button onClick={() => setShowAll(true)} style={{ ...styles.secondary, marginTop: 8 }}>
+              Alle {sorted.length} anzeigen
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Setup({ onSave, onImport, onSkip }) {
   const [s, setS] = useState({ sex: 'm', age: '', height: '', weight: '', activity: 'light', goal: 'maintain' });
   const valid = s.age && s.height && s.weight;
@@ -1703,7 +1937,7 @@ function ActivityEditor({ entry, activities, currentWeight, onSave, onDelete, on
   );
 }
 
-function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay }) {
+function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, showAlcohol = false, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0 }) {
   const isToday = selectedDate === todayKey();
   const netConsumed = Math.max(0, consumed - burned);
   const pct = Math.min(100, (consumed / target) * 100); // Balken = gegessen (brutto)
@@ -1909,13 +2143,24 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 14 }}>
           <button onClick={onGoToStats} style={{
             background: 'rgba(250,246,236,0.08)', color: 'rgba(250,246,236,0.85)',
             border: '1px solid rgba(250,246,236,0.18)', borderRadius: 6,
             padding: '6px 14px', fontFamily: 'Inter', fontSize: 11, fontWeight: 600,
             textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
           }}>Auswertung →</button>
+          {streak > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              background: streak >= 30 ? 'rgba(255,215,0,0.15)' : streak >= 7 ? 'rgba(255,140,0,0.15)' : 'rgba(250,246,236,0.08)',
+              border: `1px solid ${streak >= 30 ? 'rgba(255,215,0,0.4)' : streak >= 7 ? 'rgba(255,140,0,0.4)' : 'rgba(250,246,236,0.18)'}`,
+              borderRadius: 6, padding: '6px 10px',
+            }}>
+              <span style={{ fontSize: 14 }}>{streak >= 30 ? '🏆' : streak >= 7 ? '🔥' : '⚡'}</span>
+              <span style={{ fontFamily: 'Inter', fontSize: 11, fontWeight: 700, color: '#FAF6EC' }} className="num">{streak}d</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1965,7 +2210,21 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
                   </span>
                 )}
               </span>
-              <span className="num" style={{ fontWeight: 600 }}>{slotKcal} kcal</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="num" style={{ fontWeight: 600 }}>{slotKcal} kcal</span>
+                {!selectMode && (isToday || selectedDate > todayKey()) && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onAdd(slot); }}
+                    style={{
+                      width: 22, height: 22, borderRadius: '50%',
+                      background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)',
+                      color: '#FAF6EC', fontSize: 16, lineHeight: 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', padding: 0, flexShrink: 0,
+                    }}
+                  >+</button>
+                )}
+              </span>
             </div>
 
             {/* Einträge — ausgeblendet wenn collapsed */}
@@ -2193,6 +2452,40 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
                 color: '#FAF6EC', fontSize: 18, cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
               }}>+</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alkohol-Kachel — nur wenn aktiviert */}
+      {isToday && !selectMode && showAlcohol && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+          {/* Bier */}
+          <div style={{ flex: 1, minWidth: 0, background: 'rgba(250,246,236,0.08)', border: '1px solid rgba(250,246,236,0.15)', borderRadius: 12, padding: '10px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>🍺</span>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Bier</div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
+                {alcoholDay.beer || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{BEER_KCAL}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+              <button onClick={() => onAlcoholRemove('beer')} disabled={!alcoholDay.beer} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', color: '#FAF6EC', fontSize: 18, cursor: !alcoholDay.beer ? 'default' : 'pointer', opacity: !alcoholDay.beer ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>−</button>
+              <button onClick={() => onAlcoholAdd('beer')} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)', color: '#FAF6EC', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
+            </div>
+          </div>
+          {/* Wein */}
+          <div style={{ flex: 1, minWidth: 0, background: 'rgba(250,246,236,0.08)', border: '1px solid rgba(250,246,236,0.15)', borderRadius: 12, padding: '10px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>🍷</span>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Wein</div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
+                {alcoholDay.wine || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{WINE_KCAL}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+              <button onClick={() => onAlcoholRemove('wine')} disabled={!alcoholDay.wine} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', color: '#FAF6EC', fontSize: 18, cursor: !alcoholDay.wine ? 'default' : 'pointer', opacity: !alcoholDay.wine ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>−</button>
+              <button onClick={() => onAlcoholAdd('wine')} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)', color: '#FAF6EC', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
             </div>
           </div>
         </div>
@@ -2630,12 +2923,12 @@ function BarcodeScanner({ onResult, onCancel }) {
   );
 }
 
-function InputView({ glossary, dishes = [], activities = [], currentWeight = 75, todayEntries = [], todayActivityEntries = [], onCancel, onConfirm, onSaveDish, onAddActivityEntry, onIncrementEntry, onIncrementActivityEntry, persistGlossary, initialMode = 'text', initialScreen = 'food', initialDate = null, apiKey = '', pendingDishItems = null, onClearPending }) {
+function InputView({ glossary, dishes = [], activities = [], currentWeight = 75, todayEntries = [], todayActivityEntries = [], onCancel, onConfirm, onSaveDish, onAddActivityEntry, onIncrementEntry, onIncrementActivityEntry, persistGlossary, initialMode = 'text', initialScreen = 'food', initialDate = null, initialSlot = null, apiKey = '', pendingDishItems = null, onClearPending }) {
   const [screen, setScreen] = useState(initialScreen); // food | movement
   const [mode, setModeRaw] = useState(initialMode); // text | speech | dish
   const [textInput, setTextInput] = useState('');
   const [parsed, setParsed] = useState([]);
-  const [slot, setSlot] = useState(guessMealSlot());
+  const [slot, setSlot] = useState(initialSlot || guessMealSlot());
   // Datum: wenn initialDate gesetzt (z.B. zukünftiger Tag), dieses verwenden
   const [entryDate, setEntryDate] = useState(initialDate || todayKey());
   const [dateOffset, setDateOffset] = useState(0); // für Sprach-Erkennung "gestern"
@@ -4811,6 +5104,22 @@ function WeightChart({ weights }) {
 }
 
 // === CompactToggle ===
+function AlcoholToggle({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <span style={{ fontFamily: 'Inter', fontSize: 14, color: '#5C6B5E' }}>
+        🍺🍷 Bier/Wein-Tracker auf Heute-Seite
+      </span>
+      <button onClick={() => onChange(!value)} style={{
+        background: value ? '#1A5340' : 'rgba(13,59,46,0.08)',
+        border: '1px solid rgba(13,59,46,0.2)', borderRadius: 20,
+        padding: '6px 16px', fontFamily: 'Inter', fontSize: 12, fontWeight: 600,
+        color: value ? '#FAF6EC' : '#5C6B5E', cursor: 'pointer',
+      }}>{value ? 'An' : 'Aus'}</button>
+    </div>
+  );
+}
+
 function CompactToggle() {
   const [compact, setCompact] = useState(() => {
     try { return JSON.parse(localStorage.getItem('torcal_compact') || 'false'); } catch { return false; }
@@ -4888,14 +5197,14 @@ function ApiStatus({ apiKey }) {
 }
 
 // === Settings ===
-function SettingsView({ settings, entries, glossary, dishes = [], weights = [], activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, apiKey = '', onApiKeyChange, onSave, onBack, onImport }) {
+function SettingsView({ settings, entries, glossary, dishes = [], weights = [], activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, showAlcohol = false, onShowAlcoholChange, apiKey = '', onApiKeyChange, onSave, onBack, onImport }) {
   const [s, setS] = useState(settings);
   const [keyInput, setKeyInput] = useState(apiKey);
   const [keyVisible, setKeyVisible] = useState(false);
   const target = calcDailyKcal(s);
 
   const exportData = () => {
-    const blob = new Blob([JSON.stringify({ settings: s, entries, glossary, dishes, weights, activities, workouts, activityEntries, notes, savedAnalyses, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ settings: s, entries, glossary, dishes, weights, activities, workouts, activityEntries, notes, savedAnalyses, alcoholLog, intimacyLog, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `torcal-${todayKey()}.json`; a.click();
@@ -4999,6 +5308,9 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
       <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
         <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E', marginBottom: 10 }}>Ansicht</div>
         <CompactToggle />
+        <div style={{ marginTop: 12 }}>
+          <AlcoholToggle value={showAlcohol} onChange={onShowAlcoholChange} />
+        </div>
       </div>
 
       <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
@@ -5086,20 +5398,38 @@ function MovementInputArea({ activities, currentWeight, onAddActivityEntry, onIn
     const dur = parseInt(duration, 10);
     if (!dur || dur < 1) return;
 
-    // Falls Aktivität schon heute eingetragen: erhöhen oder neu?
+    // Manuelle Aktivität: kcal direkt eingegeben
+    if (selectedActivity.isManual) {
+      const kcal = dur; // dur = direkt kcal bei manuell
+      await onAddActivityEntry({
+        id: crypto.randomUUID(),
+        dateKey: dateKey || todayKey(),
+        time: new Date().toISOString(),
+        activityId: '__manual__',
+        activityName: selectedActivity.name || 'Training',
+        met: 0,
+        durationMin: 0,
+        weightKg: currentWeight,
+        kcal,
+        isManual: true,
+      });
+      setStatusMsg(`+${kcal} kcal · ${selectedActivity.name || 'Training'} eingetragen`);
+      setSelectedActivity(null);
+      setDuration('');
+      setSearch('');
+      setTimeout(() => { setStatusMsg(null); if (onDone) onDone(); }, 1500);
+      return;
+    }
+
+    // Doppelt-Check
     const existing = todayActivityEntries.find(a => a.activityId === selectedActivity.id);
     if (existing && onIncrementActivityEntry) {
       const choice = confirm(`„${selectedActivity.name}" ist heute schon eingetragen (${existing.durationMin} min, +${existing.kcal} kcal).\n\nOK = Dauer verdoppeln\nAbbrechen = neuer Eintrag`);
       if (choice) {
         await onIncrementActivityEntry(existing.id, existing.durationMin);
         setStatusMsg(`„${selectedActivity.name}" verdoppelt`);
-        setSelectedActivity(null);
-        setDuration('');
-        setSearch('');
-        setTimeout(() => {
-          setStatusMsg(null);
-          if (onDone) onDone();
-        }, 1500);
+        setSelectedActivity(null); setDuration(''); setSearch('');
+        setTimeout(() => { setStatusMsg(null); if (onDone) onDone(); }, 1500);
         return;
       }
     }
@@ -5117,13 +5447,8 @@ function MovementInputArea({ activities, currentWeight, onAddActivityEntry, onIn
       kcal,
     });
     setStatusMsg(`+${kcal} kcal · ${selectedActivity.name} eingetragen`);
-    setSelectedActivity(null);
-    setDuration('');
-    setSearch('');
-    setTimeout(() => {
-      setStatusMsg(null);
-      if (onDone) onDone();
-    }, 1500);
+    setSelectedActivity(null); setDuration(''); setSearch('');
+    setTimeout(() => { setStatusMsg(null); if (onDone) onDone(); }, 1500);
   };
 
   return (
@@ -5131,37 +5456,36 @@ function MovementInputArea({ activities, currentWeight, onAddActivityEntry, onIn
       {selectedActivity ? (
         <div style={{ background: '#FAF6EC', borderRadius: 12, padding: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div>
-              <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 600, color: '#0D3B2E' }}>{selectedActivity.name}</div>
-              <div style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', marginTop: 2 }} className="num">MET {selectedActivity.met} · {currentWeight} kg</div>
+            <div style={{ flex: 1 }}>
+              {selectedActivity.isManual ? (
+                <input value={selectedActivity.name} onChange={e => setSelectedActivity({ ...selectedActivity, name: e.target.value })}
+                  placeholder="Name der Aktivität" autoFocus
+                  style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 600, color: '#0D3B2E', border: 'none', background: 'transparent', padding: 0, width: '100%', outline: 'none' }} />
+              ) : (
+                <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 600, color: '#0D3B2E' }}>{selectedActivity.name}</div>
+              )}
+              <div style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', marginTop: 2 }} className="num">
+                {selectedActivity.isManual ? 'Manuell · kcal direkt eingeben' : `MET ${selectedActivity.met} · ${currentWeight} kg`}
+              </div>
             </div>
-            <button onClick={() => setSelectedActivity(null)} style={{ ...styles.iconBtnSmall, color: '#5C6B5E' }}><X size={16} /></button>
+            <button onClick={() => { setSelectedActivity(null); setDuration(''); }} style={{ ...styles.iconBtnSmall, color: '#5C6B5E' }}><X size={16} /></button>
           </div>
-          <Field label="Dauer (Minuten)">
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="z.B. 30"
+          <Field label={selectedActivity.isManual ? 'Verbrannte kcal gesamt' : 'Dauer (Minuten)'}>
+            <input type="text" inputMode="numeric"
+              placeholder={selectedActivity.isManual ? 'z.B. 400' : 'z.B. 30'}
               value={duration}
-              onChange={e => {
-                const v = e.target.value;
-                if (v === '' || /^\d+$/.test(v)) setDuration(v);
-              }}
+              onChange={e => { const v = e.target.value; if (v === '' || /^\d+$/.test(v)) setDuration(v); }}
               style={styles.input}
-              autoFocus
             />
           </Field>
-          {duration && parseInt(duration, 10) > 0 && (
+          {!selectedActivity.isManual && duration && parseInt(duration, 10) > 0 && (
             <div style={{ background: 'rgba(13,59,46,0.08)', padding: '10px 14px', borderRadius: 8, marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', textTransform: 'uppercase', letterSpacing: 1 }}>Verbrennt</span>
               <span style={{ fontFamily: 'Fraunces', fontSize: 22, fontWeight: 600, color: '#0D3B2E' }} className="num">+{calcActivityKcal(selectedActivity.met, currentWeight, parseInt(duration, 10))} kcal</span>
             </div>
           )}
-          <button
-            style={{ ...styles.primary, marginTop: 16, opacity: duration && parseInt(duration, 10) > 0 ? 1 : 0.4 }}
-            disabled={!duration || parseInt(duration, 10) < 1}
-            onClick={handleAdd}
-          >
+          <button style={{ ...styles.primary, marginTop: 16, opacity: duration && parseInt(duration, 10) > 0 ? 1 : 0.4 }}
+            disabled={!duration || parseInt(duration, 10) < 1} onClick={handleAdd}>
             Eintragen
           </button>
         </div>
@@ -5193,10 +5517,22 @@ function MovementInputArea({ activities, currentWeight, onAddActivityEntry, onIn
               </div>
             ))}
             {filtered.length === 0 && search && (
-              <div style={{ padding: '24px 16px', textAlign: 'center', fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.6)' }}>
-                Keine Aktivität gefunden. Du kannst eigene im Glossar (Trainings) anlegen.
+              <div style={{ padding: '16px 16px 8px', textAlign: 'center', fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.6)' }}>
+                Keine Aktivität gefunden.
               </div>
             )}
+            {/* Manuell eintragen */}
+            <button
+              onClick={() => setSelectedActivity({ id: '__manual__', name: search || '', met: 0, isManual: true })}
+              style={{
+                background: 'transparent', color: 'rgba(250,246,236,0.7)',
+                border: '1px dashed rgba(250,246,236,0.3)', borderRadius: 8,
+                padding: '10px 14px', fontFamily: 'Inter', fontSize: 13,
+                marginTop: 8, cursor: 'pointer', width: '100%',
+              }}
+            >
+              + Manuell eintragen (Name + kcal)
+            </button>
           </div>
         </>
       )}
