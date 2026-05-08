@@ -131,13 +131,13 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.19';
+const APP_VERSION = '3.20';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
 const WATER_GOAL = 8;   // Gläser pro Tag
-const BEER_KCAL = 145;  // 330ml Bier
-const WINE_KCAL = 170;  // 200ml Wein
+const BEER_KCAL = 145;     // 330ml Bier
+const CREMANT_KCAL = 170;  // 200ml Crémant
 
 const todayKey = (d = new Date()) => d.toISOString().slice(0, 10);
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -631,7 +631,7 @@ function App() {
   const [coffeeLog, setCoffeeLog] = useState({}); // { 'YYYY-MM-DD': count }
   const [waterLog, setWaterLog] = useState({});   // { 'YYYY-MM-DD': count }
   const [waterGoal, setWaterGoal] = useState(8);
-  const [alcoholLog, setAlcoholLog] = useState({}); // { 'YYYY-MM-DD': { beer: n, wine: n } }
+  const [alcoholLog, setAlcoholLog] = useState({}); // { 'YYYY-MM-DD': { beer: n, cremant: n } }
   const [intimacyLog, setIntimacyLog] = useState([]); // [{id, date, note}]
   const [showAlcohol, setShowAlcohol] = useState(false); // in Einstellungen aktivierbar
   const [showIntimacy, setShowIntimacy] = useState(false); // versteckt aktivierbar
@@ -682,6 +682,18 @@ function App() {
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Undo-Angebote aus Kind-Komponenten (z.B. Glossar-Löschen)
+  useEffect(() => {
+    const handler = () => {
+      if (window._torcalUndo) {
+        offerUndo(window._torcalUndo.label, window._torcalUndo.restore);
+        window._torcalUndo = null;
+      }
+    };
+    window.addEventListener('torcal-undo-offer', handler);
+    return () => window.removeEventListener('torcal-undo-offer', handler);
   }, []);
 
   // rAF-Loop läuft App-weit, unabhängig vom aktiven Tab
@@ -1052,8 +1064,8 @@ function App() {
             const newLog = { ...alcoholLog, [date]: newDay };
             await persistAlcoholLog(newLog);
             // Alkohol als kcal-Eintrag buchen
-            const kcal = type === 'beer' ? BEER_KCAL : WINE_KCAL;
-            const name = type === 'beer' ? `Bier ×${prev + 1}` : `Wein ×${prev + 1}`;
+            const kcal = type === 'beer' ? BEER_KCAL : CREMANT_KCAL;
+            const name = type === 'beer' ? `Bier ×${prev + 1}` : `Crémant ×${prev + 1}`;
             const existing = entries.find(e => e.dateKey === date && e.isAlcohol && e.alcoholType === type);
             if (existing) {
               await persistEntries(entries.map(e => e.id === existing.id
@@ -1076,13 +1088,13 @@ function App() {
             if (prev <= 0) return;
             const newDay = { ...day, [type]: prev - 1 };
             await persistAlcoholLog({ ...alcoholLog, [date]: newDay });
-            const kcal = type === 'beer' ? BEER_KCAL : WINE_KCAL;
+            const kcal = type === 'beer' ? BEER_KCAL : CREMANT_KCAL;
             const existing = entries.find(e => e.dateKey === date && e.isAlcohol && e.alcoholType === type);
             if (!existing) return;
             if (prev - 1 === 0) {
               await persistEntries(entries.filter(e => e.id !== existing.id));
             } else {
-              const newName = type === 'beer' ? `Bier ×${prev - 1}` : `Wein ×${prev - 1}`;
+              const newName = type === 'beer' ? `Bier ×${prev - 1}` : `Crémant ×${prev - 1}`;
               await persistEntries(entries.map(e => e.id === existing.id
                 ? { ...e, qty: prev - 1, kcal: (prev - 1) * kcal, foodName: newName }
                 : e));
@@ -1155,18 +1167,50 @@ function App() {
           onDelete={async (id) => {
             const deleted = entries.find(e => e.id === id);
             await persistEntries(entries.filter(e => e.id !== id));
+            // Wenn Alkohol-Eintrag: alcoholLog synchronisieren
+            if (deleted?.isAlcohol) {
+              const date = deleted.dateKey;
+              const type = deleted.alcoholType;
+              const day = alcoholLog[date] || {};
+              const newCount = Math.max(0, (day[type] || 0) - deleted.qty);
+              await persistAlcoholLog({ ...alcoholLog, [date]: { ...day, [type]: newCount } });
+            }
             if (deleted) {
               offerUndo(`„${deleted.foodName}" gelöscht`, async () => {
                 await persistEntries([...entries.filter(e => e.id !== id), deleted]);
+                if (deleted.isAlcohol) {
+                  const date = deleted.dateKey;
+                  const type = deleted.alcoholType;
+                  const day = alcoholLog[date] || {};
+                  await persistAlcoholLog({ ...alcoholLog, [date]: { ...day, [type]: (day[type] || 0) + deleted.qty } });
+                }
               });
             }
           }}
           onDeleteMany={async (ids) => {
             const deletedItems = entries.filter(e => ids.has(e.id));
             await persistEntries(entries.filter(e => !ids.has(e.id)));
+            // Alkohol-Einträge: Log synchronisieren
+            const alcoholDeleted = deletedItems.filter(e => e.isAlcohol);
+            if (alcoholDeleted.length > 0) {
+              const newLog = { ...alcoholLog };
+              for (const e of alcoholDeleted) {
+                const day = newLog[e.dateKey] || {};
+                newLog[e.dateKey] = { ...day, [e.alcoholType]: Math.max(0, (day[e.alcoholType] || 0) - e.qty) };
+              }
+              await persistAlcoholLog(newLog);
+            }
             if (deletedItems.length > 0) {
               offerUndo(`${deletedItems.length} ${deletedItems.length === 1 ? 'Eintrag' : 'Einträge'} gelöscht`, async () => {
                 await persistEntries([...entries.filter(e => !ids.has(e.id)), ...deletedItems]);
+                if (alcoholDeleted.length > 0) {
+                  const restoredLog = { ...alcoholLog };
+                  for (const e of alcoholDeleted) {
+                    const day = restoredLog[e.dateKey] || {};
+                    restoredLog[e.dateKey] = { ...day, [e.alcoholType]: (day[e.alcoholType] || 0) + e.qty };
+                  }
+                  await persistAlcoholLog(restoredLog);
+                }
               });
             }
           }}
@@ -1192,6 +1236,9 @@ function App() {
           }}
           onUpdateActivity={async (updated) => persistActivityEntries(activityEntries.map(a => a.id === updated.id ? updated : a))}
           onSaveWorkout={async (workout) => persistWorkouts([...workouts, workout])}
+          onConfirmMany={async (copied) => {
+            await persistEntries([...entries, ...copied]);
+          }}
           onRepeatYesterday={async (selectedSlots) => {
             const yKey = todayKey(new Date(Date.now() - 86400000));
             const yEntries = entries.filter(e => e.dateKey === yKey && (!selectedSlots || selectedSlots.has(e.slot)));
@@ -1281,6 +1328,8 @@ function App() {
           onChange={persistGlossary}
           onChangeActivities={persistActivities}
           onBack={() => setView('today')}
+          apiKey={apiKey}
+          onOfferUndo={offerUndo}
         />
       )}
 
@@ -1937,14 +1986,14 @@ function ActivityEditor({ entry, activities, currentWeight, onSave, onDelete, on
   );
 }
 
-function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, showAlcohol = false, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0 }) {
+function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, showAlcohol = false, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0, onConfirmMany }) {
   const isToday = selectedDate === todayKey();
   const netConsumed = Math.max(0, consumed - burned);
   const pct = Math.min(100, (consumed / target) * 100); // Balken = gegessen (brutto)
   const over = consumed > target + burned; // überschritten = gegessen > ziel + sport
 
   // Makro-Summen (Kaffee-Einträge ausschließen)
-  const totals = entries.filter(e => !e.isCoffee).reduce((acc, e) => ({
+  const totals = entries.filter(e => !e.isCoffee && !e.isAlcohol).reduce((acc, e) => ({
     protein: acc.protein + (e.protein || 0),
     carbs: acc.carbs + (e.carbs || 0),
     fat: acc.fat + (e.fat || 0),
@@ -1955,7 +2004,7 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
   // Kaffee-Einträge aus Slot-Anzeige ausblenden (steht im Widget)
   const bySlot = slots.map(slot => ({
     slot,
-    items: entries.filter(e => e.slot === slot && !e.isCoffee),
+    items: entries.filter(e => e.slot === slot),
   })).filter(s => s.items.length > 0);
   const dayActivityEntries = activityEntries || [];
 
@@ -2466,7 +2515,7 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Bier</div>
               <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
-                {alcoholDay.beer || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{BEER_KCAL}</span>
+                {alcoholDay.beer || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>× 330ml</span>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
@@ -2476,16 +2525,16 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
           </div>
           {/* Wein */}
           <div style={{ flex: 1, minWidth: 0, background: 'rgba(250,246,236,0.08)', border: '1px solid rgba(250,246,236,0.15)', borderRadius: 12, padding: '10px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 20, flexShrink: 0 }}>🍷</span>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>🥂</span>
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Wein</div>
               <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
-                {alcoholDay.wine || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{WINE_KCAL}</span>
+                {alcoholDay.cremant || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>× 200ml</span>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-              <button onClick={() => onAlcoholRemove('wine')} disabled={!alcoholDay.wine} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', color: '#FAF6EC', fontSize: 18, cursor: !alcoholDay.wine ? 'default' : 'pointer', opacity: !alcoholDay.wine ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>−</button>
-              <button onClick={() => onAlcoholAdd('wine')} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)', color: '#FAF6EC', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
+              <button onClick={() => onAlcoholRemove('cremant')} disabled={!alcoholDay.cremant} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', color: '#FAF6EC', fontSize: 18, cursor: !alcoholDay.cremant ? 'default' : 'pointer', opacity: !alcoholDay.cremant ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>−</button>
+              <button onClick={() => onAlcoholAdd('cremant')} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)', color: '#FAF6EC', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
             </div>
           </div>
         </div>
@@ -2560,27 +2609,30 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
               >Löschen</button>
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {hasFoodSelection && (
-                <button
-                  onClick={() => setSavingDish(true)}
-                  style={{ ...styles.primary, marginTop: 0, flex: 1 }}
-                >Als Gericht speichern</button>
+                <button onClick={() => setSavingDish(true)}
+                  style={{ ...styles.primary, marginTop: 0, flex: 1 }}>Als Gericht speichern</button>
               )}
               {hasActivitySelection && (
-                <button
-                  onClick={() => setSavingWorkout(true)}
-                  style={{ ...styles.primary, marginTop: 0, flex: 1 }}
-                >Als Workout speichern</button>
+                <button onClick={() => setSavingWorkout(true)}
+                  style={{ ...styles.primary, marginTop: 0, flex: 1 }}>Als Workout speichern</button>
               )}
-              <button
-                onClick={handleDeleteSelection}
-                style={{
-                  background: 'transparent', color: '#E8A89F',
-                  border: '1px solid rgba(232,168,159,0.4)', borderRadius: 10,
-                  padding: '0 18px', fontSize: 14, fontWeight: 500,
-                }}
-              >Löschen</button>
+              {hasFoodSelection && (
+                <CopyToDayButton
+                  count={[...selectedIds].filter(id => id.startsWith('e:')).length}
+                  onCopy={(targetDate) => {
+                    const selected = entries.filter(e => selectedIds.has('e:' + e.id));
+                    const copied = selected.map(e => ({ ...e, id: crypto.randomUUID(), dateKey: targetDate, time: new Date().toISOString() }));
+                    onConfirmMany(copied);
+                    exitSelectMode();
+                  }}
+                />
+              )}
+              <button onClick={handleDeleteSelection}
+                style={{ background: 'transparent', color: '#E8A89F', border: '1px solid rgba(232,168,159,0.4)', borderRadius: 10, padding: '0 18px', fontSize: 14, fontWeight: 500 }}>
+                Löschen
+              </button>
             </div>
           )}
         </div>
@@ -3762,6 +3814,34 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
 }
 
 // === PhotoResultRow: editierbare Zeile für Foto-Erkennungs-Ergebnis ===
+// === CopyToDayButton ===
+function CopyToDayButton({ count, onCopy }) {
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() + 1);
+    return todayKey(d);
+  });
+  if (!open) return (
+    <button onClick={() => setOpen(true)} style={{ ...styles.secondary, flex: 1, marginTop: 0 }}>
+      📋 An Tag kopieren
+    </button>
+  );
+  return (
+    <div style={{ flex: 1, background: 'rgba(250,246,236,0.12)', borderRadius: 10, padding: '10px 12px', display: 'flex', gap: 8, alignItems: 'center' }}>
+      <input type="date" value={date} onChange={e => setDate(e.target.value)}
+        style={{ ...styles.input, flex: 1, padding: '6px 10px', fontSize: 13 }} />
+      <button onClick={() => { onCopy(date); setOpen(false); }}
+        style={{ background: '#FAF6EC', color: '#0D3B2E', border: 'none', borderRadius: 8, padding: '8px 14px', fontFamily: 'Inter', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+        ✓
+      </button>
+      <button onClick={() => setOpen(false)}
+        style={{ background: 'transparent', border: 'none', color: '#FAF6EC', cursor: 'pointer', padding: 4 }}>
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
 function PhotoResultRow({ item, idx, onChange, onRemove, onAddToGlossary }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(item.foodName);
@@ -4207,7 +4287,7 @@ function DishEditor({ dish, glossary, onSave, onDelete, onCancel }) {
 }
 
 // === Glossar ===
-function Glossary({ glossary, activities, onChange, onChangeActivities, onBack }) {
+function Glossary({ glossary, activities, onChange, onChangeActivities, onBack, apiKey = '', onOfferUndo }) {
   const [tab, setTab] = useState('food'); // food | activity
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null);
@@ -4344,12 +4424,20 @@ function Glossary({ glossary, activities, onChange, onChangeActivities, onBack }
       {editing && (
         <FoodEditor
           food={editing}
+          apiKey={apiKey}
           onSave={(f) => {
             if (f.id) onChange(glossary.map(g => g.id === f.id ? f : g));
             else onChange([...glossary, { ...f, id: 'g' + crypto.randomUUID().slice(0, 8) }]);
             setEditing(null);
           }}
-          onDelete={() => { onChange(glossary.filter(g => g.id !== editing.id)); setEditing(null); }}
+          onDelete={() => {
+            const deleted = editing;
+            onChange(glossary.filter(g => g.id !== editing.id));
+            setEditing(null);
+            if (onOfferUndo) onOfferUndo(`„${deleted.name}" gelöscht`, async () => {
+              onChange([...glossary.filter(g => g.id !== deleted.id), deleted]);
+            });
+          }}
           onCancel={() => setEditing(null)}
         />
       )}
@@ -4407,7 +4495,7 @@ function ActivityGlossaryEditor({ activity, onSave, onDelete, onCancel }) {
   );
 }
 
-function FoodEditor({ food, onSave, onDelete, onCancel }) {
+function FoodEditor({ food, onSave, onDelete, onCancel, apiKey = '' }) {
   const [f, setF] = useState({
     protein: 0, carbs: 0, fat: 0,
     ...food,
@@ -4416,8 +4504,51 @@ function FoodEditor({ food, onSave, onDelete, onCancel }) {
   const [newUnit, setNewUnit] = useState('');
   const [newUnitG, setNewUnitG] = useState('');
   const [lookupQuery, setLookupQuery] = useState('');
-  const [lookupResults, setLookupResults] = useState(null); // null | [] | [...]
+  const [lookupResults, setLookupResults] = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [cropImageUrl, setCropImageUrl] = useState(null);
+  const [photoAnalyzing, setPhotoAnalyzing] = useState(false);
+  const galleryRef = useRef(null);
+
+  const handlePhotoCapture = (base64, mediaType) => {
+    setShowCamera(false);
+    setCropImageUrl('data:' + mediaType + ';base64,' + base64);
+  };
+
+  const handleGallerySelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = ev => resolve(ev.target.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    setCropImageUrl(dataUrl);
+  };
+
+  const handleCroppedPhoto = async (base64, mediaType) => {
+    setCropImageUrl(null);
+    if (!apiKey) { alert('API-Key benötigt (Mehr → API-Key)'); return; }
+    setPhotoAnalyzing(true);
+    try {
+      const results = await analyzePhoto(base64, mediaType, apiKey);
+      if (results && results.length > 0) {
+        const r = results[0];
+        setF(prev => ({
+          ...prev,
+          name: prev.name || r.name,
+          kcalPer100g: r.kcalPer100g || prev.kcalPer100g,
+          protein: r.protein || prev.protein,
+          carbs: r.carbs || prev.carbs,
+          fat: r.fat || prev.fat,
+        }));
+        setLookupQuery(r.name);
+      }
+    } catch (e) { alert('Fehler: ' + e.message); }
+    finally { setPhotoAnalyzing(false); }
+  };
 
   const runLookup = async (query) => {
     if (!query || !query.trim()) return;
@@ -4445,6 +4576,22 @@ function FoodEditor({ food, onSave, onDelete, onCancel }) {
     <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: '#0D3B2E', backgroundImage: 'radial-gradient(circle at top, #1A5340 0%, #0D3B2E 100%)', width: '100%', borderRadius: '20px 20px 0 0', padding: 24, maxHeight: '90vh', overflow: 'auto', maxWidth: 480, margin: '0 auto', borderTop: '1px solid rgba(250,246,236,0.15)' }}>
         <h2 style={{ fontFamily: 'Fraunces', margin: '0 0 16px', color: '#FAF6EC', fontWeight: 600 }}>{food.id ? 'Bearbeiten' : 'Neu'}</h2>
+
+        {/* Foto-Scan */}
+        <input ref={galleryRef} type="file" accept="image/*" onChange={handleGallerySelect} style={{ display: 'none' }} />
+        {showCamera && <CameraCapture onCapture={handlePhotoCapture} onCancel={() => setShowCamera(false)} />}
+        {cropImageUrl && <ImageCropper imageDataUrl={cropImageUrl} onCrop={handleCroppedPhoto} onCancel={() => setCropImageUrl(null)} />}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <button onClick={() => setShowCamera(true)} disabled={photoAnalyzing}
+            style={{ flex: 1, background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 8, color: '#FAF6EC', padding: '8px 0', fontFamily: 'Inter', fontSize: 12, cursor: 'pointer' }}>
+            📷 Foto scannen
+          </button>
+          <button onClick={() => galleryRef.current?.click()} disabled={photoAnalyzing}
+            style={{ flex: 1, background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 8, color: '#FAF6EC', padding: '8px 0', fontFamily: 'Inter', fontSize: 12, cursor: 'pointer' }}>
+            🖼️ Galerie
+          </button>
+        </div>
+        {photoAnalyzing && <div style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.7)', marginBottom: 12, textAlign: 'center' }}>🔍 Analysiere...</div>}
         <Field label="Name"><input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} style={styles.input} /></Field>
 
         {/* Werte aus dem Netz holen */}
@@ -5108,7 +5255,7 @@ function AlcoholToggle({ value, onChange }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
       <span style={{ fontFamily: 'Inter', fontSize: 14, color: '#5C6B5E' }}>
-        🍺🍷 Bier/Wein-Tracker auf Heute-Seite
+        🍺🥂 Bier/Wein-Tracker auf Heute-Seite
       </span>
       <button onClick={() => onChange(!value)} style={{
         background: value ? '#1A5340' : 'rgba(13,59,46,0.08)',
@@ -5201,6 +5348,7 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
   const [s, setS] = useState(settings);
   const [keyInput, setKeyInput] = useState(apiKey);
   const [keyVisible, setKeyVisible] = useState(false);
+  const [tab, setTab] = useState('profil'); // profil | tracker | darstellung | daten
   const target = calcDailyKcal(s);
 
   const exportData = () => {
@@ -5231,6 +5379,20 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
         <h1 style={{ ...styles.h1, margin: 0, fontSize: 24 }}>Einstellungen</h1>
       </div>
 
+      {/* Tab-Navigation */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 20, overflowX: 'auto', paddingBottom: 4 }}>
+        {[['profil','👤 Profil'],['tracker','📊 Tracker'],['darstellung','🎨 Ansicht'],['daten','💾 Daten']].map(([v, l]) => (
+          <button key={v} onClick={() => setTab(v)} style={{
+            background: tab === v ? 'rgba(250,246,236,0.18)' : 'rgba(250,246,236,0.07)',
+            border: `1px solid ${tab === v ? 'rgba(250,246,236,0.4)' : 'rgba(250,246,236,0.15)'}`,
+            borderRadius: 8, padding: '7px 14px', fontFamily: 'Inter', fontSize: 12, fontWeight: 600,
+            color: tab === v ? '#FAF6EC' : 'rgba(250,246,236,0.6)', cursor: 'pointer', whiteSpace: 'nowrap',
+          }}>{l}</button>
+        ))}
+      </div>
+
+      {/* === PROFIL === */}
+      {tab === 'profil' && <>
       <Field label="Geschlecht">
         <div style={styles.segGroup}>
           {[{ v: 'm', l: 'Mann' }, { v: 'f', l: 'Frau' }].map(o => (
@@ -5256,130 +5418,75 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
           ))}
         </div>
       </Field>
-
-      <div style={{ background: '#FAF6EC', padding: '16px 20px', borderRadius: 12, marginTop: 16, fontFamily: 'Inter', fontSize: 13 }}>
-        Neues Tagesziel: <span style={{ fontFamily: 'Fraunces', fontSize: 22, fontWeight: 600 }} className="num">{target}</span> kcal
+      <div style={{ background: '#FAF6EC', padding: '16px 20px', borderRadius: 12, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', textTransform: 'uppercase', letterSpacing: 1 }}>Neues Tagesziel</span>
+        <span style={{ fontFamily: 'Fraunces', fontSize: 22, fontWeight: 600 }} className="num">{target} kcal</span>
       </div>
-
       <button style={styles.primary} onClick={() => onSave(s)}>Speichern</button>
+      </>}
 
-      <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
-        <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E', marginBottom: 12 }}>KI-Suche (optional)</div>
-        <p style={{ fontFamily: 'Inter', fontSize: 13, color: '#5C6B5E', lineHeight: 1.5, marginTop: 0 }}>
-          Für unbekannte Lebensmittel sucht die App zuerst kostenlos in Open Food Facts.
-          Mit einem Anthropic API-Key kann Claude auch generische Sachen wie „Hummus" oder „Linsensuppe" schätzen.
-          Key bekommst du auf <span style={{ color: '#0D3B2E' }}>console.anthropic.com</span>. Liegt nur lokal auf deinem Gerät.
-        </p>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            type={keyVisible ? 'text' : 'password'}
-            placeholder="sk-ant-..."
-            value={keyInput}
-            onChange={e => setKeyInput(e.target.value)}
-            style={{ ...styles.input, flex: 1, fontFamily: 'monospace', fontSize: 12 }}
-          />
-          <button style={styles.iconBtn} onClick={() => setKeyVisible(!keyVisible)}>
-            {keyVisible ? '🙈' : '👁'}
-          </button>
-        </div>
-        <button
-          style={{ ...styles.secondary, marginTop: 8 }}
-          onClick={async () => { await onApiKeyChange(keyInput); alert('API-Key gespeichert'); }}
-        >
-          API-Key speichern
-        </button>
-        {apiKey && (
-          <div style={{ marginTop: 8, textAlign: 'center' }}>
-            <a
-              href="https://console.anthropic.com/settings/billing"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                fontFamily: 'Inter', fontSize: 12, color: '#1A5340',
-                textDecoration: 'underline', cursor: 'pointer',
-              }}
-            >
-              🔗 Guthaben prüfen (console.anthropic.com)
-            </a>
+      {/* === TRACKER === */}
+      {tab === 'tracker' && <>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'rgba(250,246,236,0.6)', marginBottom: 12 }}>Wasser-Tagesziel</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <input type="number" inputMode="numeric" min="1" max="20" value={waterGoal}
+              onChange={e => { const v = e.target.value; if (v === '') { onWaterGoalChange(v); return; } const n = parseInt(v); if (!isNaN(n)) onWaterGoalChange(Math.max(1, Math.min(20, n))); }}
+              onBlur={e => { const n = parseInt(e.target.value); if (isNaN(n) || n < 1) onWaterGoalChange(8); }}
+              style={{ ...styles.input, width: 80, textAlign: 'center' }} />
+            <span style={{ fontFamily: 'Inter', fontSize: 14, color: 'rgba(250,246,236,0.7)' }}>Gläser à {WATER_ML}ml</span>
           </div>
-        )}
-      </div>
-
-      <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
-        <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E', marginBottom: 10 }}>Ansicht</div>
-        <CompactToggle />
-        <div style={{ marginTop: 12 }}>
-          <AlcoholToggle value={showAlcohol} onChange={onShowAlcoholChange} />
         </div>
-      </div>
-
-      <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
-        <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E', marginBottom: 10 }}>Wasser-Tagesziel</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <input
-            type="number"
-            inputMode="numeric"
-            min="1" max="20"
-            value={waterGoal}
-            onChange={e => {
-              const v = e.target.value;
-              if (v === '') { onWaterGoalChange(v); return; } // leeres Feld erlauben
-              const n = parseInt(v);
-              if (!isNaN(n)) onWaterGoalChange(Math.max(1, Math.min(20, n)));
-            }}
-            onBlur={e => {
-              const n = parseInt(e.target.value);
-              if (isNaN(n) || n < 1) onWaterGoalChange(8); // Fallback auf 8
-            }}
-            style={{ ...styles.input, width: 80, textAlign: 'center' }}
-          />
-          <span style={{ fontFamily: 'Inter', fontSize: 14, color: '#5C6B5E' }}>Gläser à {WATER_ML}ml = {waterGoal * WATER_ML}ml</span>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'rgba(250,246,236,0.6)', marginBottom: 12 }}>KI-Suche</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input type={keyVisible ? 'text' : 'password'} placeholder="sk-ant-..." value={keyInput}
+              onChange={e => setKeyInput(e.target.value)}
+              style={{ ...styles.input, flex: 1, fontFamily: 'monospace', fontSize: 12 }} />
+            <button style={styles.iconBtn} onClick={() => setKeyVisible(!keyVisible)}>{keyVisible ? '🙈' : '👁'}</button>
+          </div>
+          <button style={{ ...styles.secondary, marginTop: 8 }} onClick={async () => { await onApiKeyChange(keyInput); alert('API-Key gespeichert'); }}>
+            API-Key speichern
+          </button>
+          {apiKey && (
+            <div style={{ marginTop: 8, textAlign: 'center' }}>
+              <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener noreferrer"
+                style={{ fontFamily: 'Inter', fontSize: 12, color: '#90C8A8', textDecoration: 'underline' }}>
+                🔗 Guthaben prüfen
+              </a>
+            </div>
+          )}
         </div>
-      </div>
-
-      <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
-        <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E', marginBottom: 6 }}>Notizen</div>
-        <div style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', marginBottom: 10 }}>
-          Ideen, Wünsche, Erinnerungen für später. Wird beim Backup mit gespeichert.
+        <div>
+          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'rgba(250,246,236,0.6)', marginBottom: 10 }}>Notizen</div>
+          <textarea value={notes} onChange={e => onNotesChange(e.target.value)}
+            placeholder="Ideen, Wünsche..." rows={5}
+            style={{ ...styles.input, width: '100%', minHeight: 100, resize: 'vertical', fontFamily: 'Inter', fontSize: 14, lineHeight: 1.5, padding: '10px 12px' }} />
         </div>
-        <textarea
-          value={notes}
-          onChange={e => onNotesChange(e.target.value)}
-          placeholder="z.B. Toggle Essen↔Bewegung, Live-Filter im Glossar..."
-          rows={6}
-          style={{
-            ...styles.input,
-            width: '100%',
-            minHeight: 120,
-            resize: 'vertical',
-            fontFamily: 'Inter',
-            fontSize: 14,
-            lineHeight: 1.5,
-            padding: '10px 12px',
-          }}
-        />
-      </div>
+      </>}
 
-      <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #D8D2C2' }}>
-        <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E', marginBottom: 12 }}>Daten</div>
-        <button style={styles.secondary} onClick={exportData}>Export (Backup)</button>
-        <label style={{ ...styles.secondary, display: 'block', textAlign: 'center', marginTop: 8 }}>
-          Import
+      {/* === ANSICHT === */}
+      {tab === 'darstellung' && <>
+        <div style={{ marginBottom: 16 }}><CompactToggle /></div>
+        <div style={{ marginBottom: 16 }}><AlcoholToggle value={showAlcohol} onChange={onShowAlcoholChange} /></div>
+      </>}
+
+      {/* === DATEN === */}
+      {tab === 'daten' && <>
+        <button style={styles.secondary} onClick={exportData}>📦 Export (Backup)</button>
+        <label style={{ ...styles.secondary, display: 'block', textAlign: 'center', marginTop: 8, cursor: 'pointer' }}>
+          📥 Import
           <input type="file" accept=".json" onChange={importData} style={{ display: 'none' }} />
         </label>
-        <div style={{ fontFamily: 'Inter', fontSize: 11, color: '#5C6B5E', marginTop: 8, textAlign: 'center' }}>
-          {entries.length} Einträge · {glossary.length} im Glossar · {dishes.length} Gerichte · {weights.length} Wiegen{savedAnalyses.length > 0 ? ` · ${savedAnalyses.length} Analysen` : ''}
+        <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 12, textAlign: 'center', lineHeight: 1.8 }}>
+          {entries.length} Einträge · {glossary.length} Glossar · {dishes.length} Gerichte<br/>
+          {weights.length} Wiegen{savedAnalyses.length > 0 ? ` · ${savedAnalyses.length} Analysen` : ''}
         </div>
-      </div>
-
-      <div style={{ marginTop: 32, paddingTop: 16, paddingBottom: 8, textAlign: 'center', borderTop: '1px solid #D8D2C2' }}>
-        <div style={{ fontFamily: 'Fraunces', fontSize: 14, fontWeight: 600, color: '#5C6B5E' }}>
-          {APP_NAME} v{APP_VERSION}
+        <div style={{ marginTop: 32, textAlign: 'center' }}>
+          <div style={{ fontFamily: 'Fraunces', fontSize: 14, fontWeight: 600, color: 'rgba(250,246,236,0.5)' }}>{APP_NAME} v{APP_VERSION}</div>
+          <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.35)', marginTop: 4 }}>© by torben</div>
         </div>
-        <div style={{ fontFamily: 'Inter', fontSize: 11, color: '#8A938C', marginTop: 4 }}>
-          © by torben
-        </div>
-      </div>
+      </>}
     </div>
   );
 }
