@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.17';
+const APP_VERSION = '3.18';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -860,6 +860,19 @@ function App() {
         .num { font-variant-numeric: tabular-nums; }
       `}</style>
 
+      {/* Logo-Header — sichtbar auf allen Tabs außer Setup/Input */}
+      {view !== 'setup' && view !== 'input' && (
+        <div style={{
+          padding: '12px 20px 8px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          borderBottom: '1px solid rgba(250,246,236,0.08)',
+        }}>
+          <span style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 700, color: '#FAF6EC', letterSpacing: 0.5 }}>
+            Torcal
+          </span>
+        </div>
+      )}
+
       {view === 'setup' && (
         <Setup
           onSave={async (s) => { await persistSettings(s); setView('today'); }}
@@ -959,11 +972,13 @@ function App() {
             await persistWaterLog({ ...waterLog, [date]: prev - 1 });
           }}
           waterGoal={waterGoal}
-          onExportDay={() => {
+          onExportDay={(deep = false) => {
             const date = selectedDate;
-            const dayEntries = entries.filter(e => e.dateKey === date && !e.isCoffee);
+            const allDayEntries = entries.filter(e => e.dateKey === date); // alle inkl. Kaffee
+            const dayEntries = allDayEntries.filter(e => !e.isCoffee); // ohne Kaffee für Slots
+            const coffeeEntry = allDayEntries.find(e => e.isCoffee);
             const dayActs = activityEntries.filter(a => a.dateKey === date);
-            const consumed = dayEntries.reduce((s, e) => s + e.kcal, 0);
+            const consumed = allDayEntries.reduce((s, e) => s + e.kcal, 0); // alle inkl. Kaffee
             const burned = dayActs.reduce((s, a) => s + a.kcal, 0);
             const protein = dayEntries.reduce((s, e) => s + (e.protein || 0), 0);
             const carbs = dayEntries.reduce((s, e) => s + (e.carbs || 0), 0);
@@ -972,25 +987,53 @@ function App() {
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
               if (!items.length) return null;
-              return `**${slot}** (${items.reduce((s,e) => s+e.kcal,0)} kcal)\n` +
+              return `**${slot}** (${items.reduce((s,e)=>s+e.kcal,0)} kcal)\n` +
                 items.map(e => `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`).join('\n');
             }).filter(Boolean).join('\n\n');
             const actLines = dayActs.length
               ? `**Bewegung**\n` + dayActs.map(a => `  - ${a.activityName}: ${a.durationMin} min → +${a.kcal} kcal`).join('\n')
               : '';
-            const text = `# Torcal Tagesexport — ${date}\n\n` +
-              `**Tagesziel:** ${dailyTarget} kcal\n` +
-              `**Gegessen:** ${consumed} kcal\n` +
-              `**Verbrannt:** ${burned} kcal\n` +
-              `**Netto:** ${consumed - burned} kcal\n` +
-              `**Verbleibend:** ${dailyTarget + burned - consumed} kcal\n\n` +
-              `**Makros:** Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n` +
-              slotLines + (actLines ? '\n\n' + actLines : '');
+            const coffeeLines = coffeeEntry ? `**Kaffee:** ${coffeeEntry.qty}× Kaffee mit Milch → ${coffeeEntry.kcal} kcal\n` : '';
+
+            let text;
+            if (deep) {
+              // Deep-Analyse für Sonnet — ausführlicher Prompt
+              const userInfo = settings
+                ? `Nutzer: ${settings.sex === 'm' ? 'männlich' : 'weiblich'}, ${settings.age} Jahre, ${settings.height} cm, ${settings.weight} kg, Aktivität: ${settings.activity}, Ziel: ${settings.goal === 'lose' ? 'Abnehmen' : settings.goal === 'gain' ? 'Aufbauen' : 'Halten'}, Tagesziel: ${dailyTarget} kcal`
+                : `Tagesziel: ${dailyTarget} kcal`;
+              text = `# Torcal Deep-Analyse — ${date}\n\n` +
+                `Bitte analysiere meinen Ernährungstag ausführlich als erfahrener Ernährungsberater. Gib konkrete, personalisierte Empfehlungen.\n\n` +
+                `## Persönliche Daten\n${userInfo}\n\n` +
+                `## Tagesbilanz\n` +
+                `- Gegessen: ${consumed} kcal (inkl. Kaffee)\n` +
+                `- Verbrannt: ${burned} kcal Sport\n` +
+                `- Netto: ${consumed - burned} kcal von ${dailyTarget} kcal Ziel\n` +
+                `- Verbleibend: ${dailyTarget + burned - consumed} kcal\n` +
+                `- Makros: Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n` +
+                `## Mahlzeiten\n${slotLines || 'nichts eingetragen'}\n\n` +
+                (coffeeLines ? `## Getränke\n${coffeeLines}\n` : '') +
+                (actLines ? `## Sport\n${actLines}\n\n` : '') +
+                `## Gewünschte Analyse\n` +
+                `1. Bewerte die Makro-Verteilung (Eiweiß besonders wichtig für mein Ziel)\n` +
+                `2. Bewerte die Mahlzeiten-Verteilung über den Tag\n` +
+                `3. Was war gut, was könnte besser sein?\n` +
+                `4. Konkrete Verbesserungsvorschläge für morgen\n` +
+                `5. Rezeptideen für fehlende Mahlzeiten oder Snacks passend zu meinen Restkalorien`;
+            } else {
+              // Standard-Export
+              text = `# Torcal Tagesexport — ${date}\n\n` +
+                `**Tagesziel:** ${dailyTarget} kcal\n` +
+                `**Gegessen:** ${consumed} kcal\n` +
+                `**Verbrannt:** ${burned} kcal\n` +
+                `**Netto:** ${consumed - burned} kcal\n` +
+                `**Verbleibend:** ${dailyTarget + burned - consumed} kcal\n\n` +
+                `**Makros:** Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n` +
+                (coffeeLines ? coffeeLines + '\n' : '') +
+                slotLines + (actLines ? '\n\n' + actLines : '');
+            }
             navigator.clipboard.writeText(text).then(() => {
-              alert('Tagesübersicht kopiert! Einfach hier in den Chat einfügen.');
-            }).catch(() => {
-              alert(text);
-            });
+              alert(deep ? 'Deep-Analyse kopiert! In einen neuen Claude-Chat einfügen für ausführliche Analyse.' : 'Tagesübersicht kopiert!');
+            }).catch(() => alert(text));
           }}
           onDelete={async (id) => {
             const deleted = entries.find(e => e.id === id);
@@ -1149,6 +1192,41 @@ function App() {
           }}
           onDeleteWeight={async (id) => persistWeights(weights.filter(w => w.id !== id))}
           onBack={() => setView('today')}
+          onExportDay={(deep) => {
+            // Ruft den gleichen Handler wie Today auf
+            const date = selectedDate;
+            const allDayEntries = entries.filter(e => e.dateKey === date);
+            const dayEntries = allDayEntries.filter(e => !e.isCoffee);
+            const coffeeEntry = allDayEntries.find(e => e.isCoffee);
+            const dayActs = activityEntries.filter(a => a.dateKey === date);
+            const consumed = allDayEntries.reduce((s, e) => s + e.kcal, 0);
+            const burned = dayActs.reduce((s, a) => s + a.kcal, 0);
+            const protein = dayEntries.reduce((s, e) => s + (e.protein || 0), 0);
+            const carbs = dayEntries.reduce((s, e) => s + (e.carbs || 0), 0);
+            const fat = dayEntries.reduce((s, e) => s + (e.fat || 0), 0);
+            const slots = ['Frühstück', 'Mittag', 'Snack', 'Abend'];
+            const slotLines = slots.map(slot => {
+              const items = dayEntries.filter(e => e.slot === slot);
+              if (!items.length) return null;
+              return `**${slot}** (${items.reduce((s,e)=>s+e.kcal,0)} kcal)\n` +
+                items.map(e => `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`).join('\n');
+            }).filter(Boolean).join('\n\n');
+            const actLines = dayActs.length
+              ? `**Bewegung**\n` + dayActs.map(a => `  - ${a.activityName}: ${a.durationMin} min → +${a.kcal} kcal`).join('\n') : '';
+            const coffeeLines = coffeeEntry ? `**Kaffee:** ${coffeeEntry.qty}× → ${coffeeEntry.kcal} kcal\n` : '';
+            let text;
+            if (deep) {
+              const userInfo = settings
+                ? `Nutzer: ${settings.sex === 'm' ? 'männlich' : 'weiblich'}, ${settings.age} Jahre, ${settings.height} cm, ${settings.weight} kg, Ziel: ${settings.goal === 'lose' ? 'Abnehmen' : settings.goal === 'gain' ? 'Aufbauen' : 'Halten'}, Tagesziel: ${dailyTarget} kcal`
+                : `Tagesziel: ${dailyTarget} kcal`;
+              text = `# Torcal Deep-Analyse — ${date}\n\nBitte analysiere meinen Ernährungstag ausführlich als erfahrener Ernährungsberater.\n\n## Persönliche Daten\n${userInfo}\n\n## Tagesbilanz\n- Gegessen: ${consumed} kcal\n- Verbrannt: ${burned} kcal Sport\n- Netto: ${consumed - burned} kcal von ${dailyTarget} kcal\n- Verbleibend: ${dailyTarget + burned - consumed} kcal\n- Makros: Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n## Mahlzeiten\n${slotLines || 'nichts'}\n\n${coffeeLines ? '## Getränke\n' + coffeeLines + '\n' : ''}${actLines ? '## Sport\n' + actLines + '\n\n' : ''}## Gewünschte Analyse\n1. Makro-Verteilung bewerten\n2. Mahlzeiten-Timing bewerten\n3. Was war gut, was besser?\n4. Verbesserungen für morgen\n5. Rezeptideen für Restkalorien`;
+            } else {
+              text = `# Torcal Tagesexport — ${date}\n\n**Tagesziel:** ${dailyTarget} kcal\n**Gegessen:** ${consumed} kcal\n**Verbrannt:** ${burned} kcal\n**Netto:** ${consumed - burned} kcal\n**Verbleibend:** ${dailyTarget + burned - consumed} kcal\n\n**Makros:** Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n${coffeeLines}${slotLines}${actLines ? '\n\n' + actLines : ''}`;
+            }
+            navigator.clipboard.writeText(text).then(() => {
+              alert(deep ? 'Deep-Analyse kopiert! In neuen Claude-Chat einfügen.' : 'Tag kopiert!');
+            }).catch(() => alert(text));
+          }}
         />
       )}
 
@@ -1838,41 +1916,19 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
         )}
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 14 }}>
-          <button
-            onClick={onGoToStats}
-            style={{
-              background: 'rgba(250,246,236,0.08)', color: 'rgba(250,246,236,0.85)',
-              border: '1px solid rgba(250,246,236,0.18)', borderRadius: 6,
-              padding: '6px 14px', fontFamily: 'Inter', fontSize: 11, fontWeight: 600,
-              textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
-            }}
-          >
-            Auswertung →
-          </button>
-          <button
-            onClick={onExportDay}
-            style={{
-              background: 'rgba(250,246,236,0.08)', color: 'rgba(250,246,236,0.85)',
-              border: '1px solid rgba(250,246,236,0.18)', borderRadius: 6,
-              padding: '6px 12px', fontFamily: 'Inter', fontSize: 11, fontWeight: 600,
-              textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
-            }}
-            title="Tag kopieren für Chat"
-          >
-            📋 Tag teilen
-          </button>
-          <button
-            onClick={toggleCompact}
-            style={{
-              background: compact ? 'rgba(250,246,236,0.18)' : 'rgba(250,246,236,0.08)',
-              color: 'rgba(250,246,236,0.85)',
-              border: '1px solid rgba(250,246,236,0.18)', borderRadius: 6,
-              padding: '6px 12px', fontFamily: 'Inter', fontSize: 11, fontWeight: 600,
-              textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
-            }}
-          >
-            {compact ? '☰ Normal' : '☰ Kompakt'}
-          </button>
+          <button onClick={onGoToStats} style={{
+            background: 'rgba(250,246,236,0.08)', color: 'rgba(250,246,236,0.85)',
+            border: '1px solid rgba(250,246,236,0.18)', borderRadius: 6,
+            padding: '6px 14px', fontFamily: 'Inter', fontSize: 11, fontWeight: 600,
+            textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
+          }}>Auswertung →</button>
+          <button onClick={toggleCompact} style={{
+            background: compact ? 'rgba(250,246,236,0.18)' : 'rgba(250,246,236,0.08)',
+            color: 'rgba(250,246,236,0.85)',
+            border: '1px solid rgba(250,246,236,0.18)', borderRadius: 6,
+            padding: '6px 12px', fontFamily: 'Inter', fontSize: 11, fontWeight: 600,
+            textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
+          }}>{compact ? '☰ Normal' : '☰ Kompakt'}</button>
         </div>
       </div>
 
@@ -2847,22 +2903,15 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
   };
 
   const addFromSearch = (food) => {
-    // Falls schon heute eingetragen: erhöhen oder neu?
+    // Immer zur Vorschau hinzufügen — kein confirm, kein automatisches Inkrement
+    // Wenn schon eingetragen: kleiner Hinweis in der ParsedRow
     const existing = todayEntries.find(e => e.foodId === food.id);
-    if (existing) {
-      const choice = confirm(`„${food.name}" ist heute schon eingetragen (${String(existing.qty).replace('.', ',')} ${existing.unit}, ${existing.kcal} kcal).\n\nOK = Menge verdoppeln\nAbbrechen = neuer Eintrag`);
-      if (choice && onIncrementEntry) {
-        onIncrementEntry(existing.id, existing.qty);
-        setTextInput('');
-        setSearchResults(glossary.slice(0, 30));
-        return;
-      }
-    }
     setParsed([...parsed, {
       foodId: food.id, foodName: food.name, qty: 100, unit: Object.keys(food.units)[0],
       kcalPer100g: food.kcalPer100g,
       protein: food.protein || 0, carbs: food.carbs || 0, fat: food.fat || 0,
       units: food.units, isNew: false,
+      alreadyToday: existing ? `Schon eingetragen: ${existing.qty}${existing.unit}` : null,
     }]);
     setTextInput('');
     setSearchResults([...glossary].sort((a, b) => a.name.localeCompare(b.name, 'de')).slice(0, 30));
@@ -4218,7 +4267,7 @@ function FoodEditor({ food, onSave, onDelete, onCancel }) {
 }
 
 // === Stats ===
-function Stats({ entries, activityEntries = [], glossary = [], target, weights = [], settings, apiKey = '', selectedDate, setSelectedDate, savedAnalyses = [], onSaveAnalysis, onDeleteAnalysis, onAddWeight, onDeleteWeight, onBack }) {
+function Stats({ entries, activityEntries = [], glossary = [], target, weights = [], settings, apiKey = '', selectedDate, setSelectedDate, savedAnalyses = [], onSaveAnalysis, onDeleteAnalysis, onAddWeight, onDeleteWeight, onBack, onExportDay }) {
   const [range, setRange] = useState('week'); // week | month
   const [showAddWeight, setShowAddWeight] = useState(false);
   const [newWeight, setNewWeight] = useState('');
@@ -4586,6 +4635,34 @@ Aufgabe: ${aufgabe}`;
           {analysisLoading ? 'Analysiere...' : (analysis ? 'Erneut analysieren' : 'Analyse starten')}
         </button>
 
+        {/* Export-Buttons */}
+        {onExportDay && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button
+              onClick={() => onExportDay(false)}
+              style={{
+                flex: 1, background: 'rgba(13,59,46,0.08)', color: '#0D3B2E',
+                border: '1px solid rgba(13,59,46,0.2)', borderRadius: 8,
+                padding: '10px 12px', fontFamily: 'Inter', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              📋 Tag kopieren
+            </button>
+            <button
+              onClick={() => onExportDay(true)}
+              style={{
+                flex: 1, background: 'rgba(13,59,46,0.08)', color: '#0D3B2E',
+                border: '1px solid rgba(13,59,46,0.2)', borderRadius: 8,
+                padding: '10px 12px', fontFamily: 'Inter', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              🔬 Deep-Analyse kopieren
+            </button>
+          </div>
+        )}
+
         {analysisError && (
           <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(160,58,53,0.1)', border: '1px solid rgba(160,58,53,0.3)', borderRadius: 6, fontFamily: 'Inter', fontSize: 12, color: '#A03A35' }}>
             {analysisError}
@@ -4746,6 +4823,53 @@ function WeightChart({ weights }) {
   );
 }
 
+// === ApiStatus ===
+function ApiStatus({ apiKey }) {
+  const [status, setStatus] = useState(null);
+  const [msg, setMsg] = useState('');
+
+  const check = async () => {
+    setStatus('checking');
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 10,
+          messages: [{ role: 'user', content: 'Hi' }],
+        }),
+      });
+      if (res.ok) { setStatus('ok'); setMsg('✓ Verbindung OK · Guthaben vorhanden'); }
+      else if (res.status === 401) { setStatus('error'); setMsg('✗ Ungültiger API-Key'); }
+      else if (res.status === 429) { setStatus('error'); setMsg('✗ Rate-Limit oder kein Guthaben mehr'); }
+      else { setStatus('error'); setMsg(`✗ Fehler ${res.status}`); }
+    } catch { setStatus('error'); setMsg('✗ Verbindung fehlgeschlagen'); }
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button onClick={check} disabled={status === 'checking'} style={{
+        background: 'transparent', border: '1px solid #D8D2C2', borderRadius: 6,
+        padding: '6px 12px', fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E',
+        cursor: 'pointer', width: '100%',
+      }}>
+        {status === 'checking' ? '...' : '🔌 Verbindung testen'}
+      </button>
+      {msg && (
+        <div style={{ marginTop: 6, fontFamily: 'Inter', fontSize: 11, textAlign: 'center', color: status === 'ok' ? '#1A5340' : '#A03A35' }}>
+          {msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // === Settings ===
 function SettingsView({ settings, entries, glossary, dishes = [], weights = [], activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, apiKey = '', onApiKeyChange, onSave, onBack, onImport }) {
   const [s, setS] = useState(settings);
@@ -4839,9 +4963,7 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
           API-Key speichern
         </button>
         {apiKey && (
-          <div style={{ fontFamily: 'Inter', fontSize: 11, color: '#5C6B5E', marginTop: 8, textAlign: 'center' }}>
-            ✓ Aktiv – KI-Suche steht bereit
-          </div>
+          <ApiStatus apiKey={apiKey} />
         )}
       </div>
 
@@ -5506,7 +5628,6 @@ function Timer({
 // === NavBar ===
 function NavBar({ current, onNav }) {
   const items = [
-    { v: 'today', icon: Calendar, l: 'Heute' },
     { v: 'movement', icon: () => (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M9 5 Q9 3 12 3 Q15 3 15 5" />
@@ -5515,6 +5636,7 @@ function NavBar({ current, onNav }) {
       </svg>
     ), l: 'Bewegung' },
     { v: 'dishes', icon: () => <span style={{ fontFamily: 'Fraunces', fontWeight: 700, fontSize: 16, lineHeight: 1 }}>♨</span>, l: 'Gerichte' },
+    { v: 'today', icon: Calendar, l: 'Heute', center: true },
     { v: 'glossary', icon: BookOpen, l: 'Glossar' },
     { v: 'settings', icon: Settings, l: 'Mehr' },
   ];
@@ -5523,18 +5645,42 @@ function NavBar({ current, onNav }) {
       position: 'sticky', bottom: 0, left: 0, right: 0,
       background: 'rgba(10,46,34,0.95)', backdropFilter: 'blur(12px)',
       borderTop: '1px solid rgba(250,246,236,0.12)',
-      display: 'flex', justifyContent: 'space-around', padding: '10px 0 14px',
+      display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end',
+      padding: '8px 0 14px',
       marginTop: 'auto',
     }}>
-      {items.map(({ v, icon: Icon, l }) => (
-        <button key={v} onClick={() => onNav(v)} style={{
-          background: 'none', border: 'none', display: 'flex', flexDirection: 'column',
-          alignItems: 'center', gap: 4, padding: '4px 16px',
-          color: current === v ? '#FAF6EC' : 'rgba(250,246,236,0.5)',
-        }}>
-          <Icon size={20} />
-          <span style={{ fontFamily: 'Inter', fontSize: 10, fontWeight: 500 }}>{l}</span>
-        </button>
+      {items.map(({ v, icon: Icon, l, center }) => (
+        center ? (
+          // Heute — zentriert, leicht abgehoben
+          <button key={v} onClick={() => onNav(v)} style={{
+            background: 'none', border: 'none', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', gap: 4, padding: '0 16px',
+            color: current === v ? '#FAF6EC' : 'rgba(250,246,236,0.6)',
+            transform: 'translateY(-6px)',
+            position: 'relative',
+          }}>
+            <div style={{
+              width: 48, height: 48, borderRadius: '50%',
+              background: current === v ? '#1A5340' : 'rgba(250,246,236,0.1)',
+              border: `2px solid ${current === v ? '#90C8A8' : 'rgba(250,246,236,0.2)'}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: current === v ? '0 4px 16px rgba(0,0,0,0.3)' : 'none',
+              transition: 'all 200ms ease',
+            }}>
+              <Icon size={22} />
+            </div>
+            <span style={{ fontFamily: 'Inter', fontSize: 10, fontWeight: current === v ? 700 : 500 }}>{l}</span>
+          </button>
+        ) : (
+          <button key={v} onClick={() => onNav(v)} style={{
+            background: 'none', border: 'none', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', gap: 4, padding: '4px 16px',
+            color: current === v ? '#FAF6EC' : 'rgba(250,246,236,0.5)',
+          }}>
+            <Icon size={20} />
+            <span style={{ fontFamily: 'Inter', fontSize: 10, fontWeight: 500 }}>{l}</span>
+          </button>
+        )
       ))}
     </div>
   );
