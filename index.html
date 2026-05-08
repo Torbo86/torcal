@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.21c';
+const APP_VERSION = '3.21d';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -3262,19 +3262,18 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
     const ql = q.toLowerCase().trim();
     const sorted = [...glossary].sort((a, b) => a.name.localeCompare(b.name, 'de'));
     if (!ql) { setSearchResults(sorted.slice(0, 30)); return; }
-    setSearchResults(sorted.filter(g => g.name.toLowerCase().includes(ql)).slice(0, 30));
+    // Starts-with zuerst, dann contains — alphabetisch innerhalb jeder Gruppe
+    const startsWith = sorted.filter(g => g.name.toLowerCase().startsWith(ql));
+    const contains = sorted.filter(g => !g.name.toLowerCase().startsWith(ql) && g.name.toLowerCase().includes(ql));
+    setSearchResults([...startsWith, ...contains].slice(0, 30));
   };
 
   const addFromSearch = (food) => {
     // Immer zur Vorschau hinzufügen — kein confirm, kein automatisches Inkrement
     // Wenn schon eingetragen: kleiner Hinweis in der ParsedRow
     const existing = todayEntries.find(e => e.foodId === food.id);
-    // Bevorzuge sinnvolle Einheit: erste Nicht-g/ml Einheit mit qty=1, sonst 100g
-    const unitKeys = Object.keys(food.units);
-    const preferredUnit = unitKeys.find(u => u !== 'g' && u !== 'ml' && (food.units[u] || 0) > 0) || unitKeys[0] || 'g';
-    const preferredQty = (preferredUnit !== 'g' && preferredUnit !== 'ml') ? 1 : 100;
     setParsed([...parsed, {
-      foodId: food.id, foodName: food.name, qty: preferredQty, unit: preferredUnit,
+      foodId: food.id, foodName: food.name, qty: 100, unit: Object.keys(food.units)[0],
       kcalPer100g: food.kcalPer100g,
       protein: food.protein || 0, carbs: food.carbs || 0, fat: food.fat || 0,
       units: food.units, isNew: false,
@@ -3531,7 +3530,7 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
             />
           </div>
           {searchResults.length > 0 && (
-            <div style={{ background: 'white', border: '1px solid #D8D2C2', borderRadius: 8, marginTop: 8, overflow: 'hidden', maxHeight: 320, overflowY: 'auto' }}>
+            <div style={{ background: 'white', border: '1px solid #D8D2C2', borderRadius: 8, marginTop: 8, maxHeight: 320, overflowY: 'auto' }}>
               {searchResults.map(f => (
                 <div key={f.id} onClick={() => addFromSearch(f)} style={{ padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #E5DFD2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontFamily: 'Fraunces', fontSize: 16 }}>{f.name}</span>
@@ -4114,7 +4113,7 @@ function ParsedRow({ item, idx, onChange, onRemove, onLookup }) {
       )}
 
       {/* Gewicht pro Einheit eingeben, wenn unbekannt (z.B. Brötchen → wie viel g pro Stück?) */}
-      {item.unit !== 'g' && item.unit !== 'ml' && !(item.units[item.unit] > 0) && (
+      {item.unit !== 'g' && item.unit !== 'ml' && (item.units[item.unit] || 0) === 0 && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, padding: 8, background: 'rgba(139,115,85,0.1)', borderRadius: 6 }}>
           <span style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', flex: 1 }}>g pro 1 {item.unit}:</span>
           <input
