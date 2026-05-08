@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.21b';
+const APP_VERSION = '3.21c';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -3269,8 +3269,12 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
     // Immer zur Vorschau hinzufügen — kein confirm, kein automatisches Inkrement
     // Wenn schon eingetragen: kleiner Hinweis in der ParsedRow
     const existing = todayEntries.find(e => e.foodId === food.id);
+    // Bevorzuge sinnvolle Einheit: erste Nicht-g/ml Einheit mit qty=1, sonst 100g
+    const unitKeys = Object.keys(food.units);
+    const preferredUnit = unitKeys.find(u => u !== 'g' && u !== 'ml' && (food.units[u] || 0) > 0) || unitKeys[0] || 'g';
+    const preferredQty = (preferredUnit !== 'g' && preferredUnit !== 'ml') ? 1 : 100;
     setParsed([...parsed, {
-      foodId: food.id, foodName: food.name, qty: 100, unit: Object.keys(food.units)[0],
+      foodId: food.id, foodName: food.name, qty: preferredQty, unit: preferredUnit,
       kcalPer100g: food.kcalPer100g,
       protein: food.protein || 0, carbs: food.carbs || 0, fat: food.fat || 0,
       units: food.units, isNew: false,
@@ -4110,7 +4114,7 @@ function ParsedRow({ item, idx, onChange, onRemove, onLookup }) {
       )}
 
       {/* Gewicht pro Einheit eingeben, wenn unbekannt (z.B. Brötchen → wie viel g pro Stück?) */}
-      {item.unit !== 'g' && item.unit !== 'ml' && (item.units[item.unit] || 0) === 0 && (
+      {item.unit !== 'g' && item.unit !== 'ml' && !(item.units[item.unit] > 0) && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, padding: 8, background: 'rgba(139,115,85,0.1)', borderRadius: 6 }}>
           <span style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', flex: 1 }}>g pro 1 {item.unit}:</span>
           <input
@@ -4904,9 +4908,9 @@ Aufgabe: ${aufgabe}`;
                 </div>
                 <div style={{ fontFamily: 'Inter', fontSize: 11, color: '#5C6B5E', marginTop: 4 }}>
                   {fmtDate(latestWeight.date)}
-                  {weightChange !== null && (
+                  {weightChange !== null && weightRange === 90 && (
                     <span style={{ color: weightChange < 0 ? '#0D3B2E' : '#A03A35', marginLeft: 8 }}>
-                      {weightChange > 0 ? '+' : ''}{weightChange.toFixed(1).replace('.', ',')} kg / {weightRange >= 99999 ? 'Alle' : weightRange + 'T'}
+                      {weightChange > 0 ? '+' : ''}{weightChange.toFixed(1).replace('.', ',')} kg / 90T
                     </span>
                   )}
                 </div>
@@ -4944,12 +4948,12 @@ Aufgabe: ${aufgabe}`;
                   key={o.v}
                   onClick={() => setWeightRange(o.v)}
                   style={{
-                    flex: 1, padding: '10px 4px',
+                    flex: 1, padding: '6px 4px',
                     background: weightRange === o.v ? '#0D3B2E' : 'transparent',
                     color: weightRange === o.v ? '#FAF6EC' : '#5C6B5E',
                     border: `1px solid ${weightRange === o.v ? '#0D3B2E' : '#D8D2C2'}`,
                     borderRadius: 6, fontSize: 11, fontWeight: 600,
-                    fontFamily: 'Inter', cursor: 'pointer',
+                    fontFamily: 'Inter',
                   }}
                 >
                   {o.l}
