@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.21';
+const APP_VERSION = '3.21b';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -4904,9 +4904,9 @@ Aufgabe: ${aufgabe}`;
                 </div>
                 <div style={{ fontFamily: 'Inter', fontSize: 11, color: '#5C6B5E', marginTop: 4 }}>
                   {fmtDate(latestWeight.date)}
-                  {weightChange !== null && weightRange === 90 && (
+                  {weightChange !== null && (
                     <span style={{ color: weightChange < 0 ? '#0D3B2E' : '#A03A35', marginLeft: 8 }}>
-                      {weightChange > 0 ? '+' : ''}{weightChange.toFixed(1).replace('.', ',')} kg / 90T
+                      {weightChange > 0 ? '+' : ''}{weightChange.toFixed(1).replace('.', ',')} kg / {weightRange >= 99999 ? 'Alle' : weightRange + 'T'}
                     </span>
                   )}
                 </div>
@@ -4944,12 +4944,12 @@ Aufgabe: ${aufgabe}`;
                   key={o.v}
                   onClick={() => setWeightRange(o.v)}
                   style={{
-                    flex: 1, padding: '6px 4px',
+                    flex: 1, padding: '10px 4px',
                     background: weightRange === o.v ? '#0D3B2E' : 'transparent',
                     color: weightRange === o.v ? '#FAF6EC' : '#5C6B5E',
                     border: `1px solid ${weightRange === o.v ? '#0D3B2E' : '#D8D2C2'}`,
                     borderRadius: 6, fontSize: 11, fontWeight: 600,
-                    fontFamily: 'Inter',
+                    fontFamily: 'Inter', cursor: 'pointer',
                   }}
                 >
                   {o.l}
