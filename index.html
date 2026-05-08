@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.20';
+const APP_VERSION = '3.21';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -627,7 +627,7 @@ function App() {
   const [activityEntries, setActivityEntries] = useState([]); // [{id, dateKey, time, activityId, activityName, met, durationMin, weightKg, kcal}]
   const [weights, setWeights] = useState([]);
   const [savedAnalyses, setSavedAnalyses] = useState([]); // [{id, date, kind, text, createdAt}]
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState([]); // [{id, text, type: 'bug'|'idea', done, createdAt}]
   const [coffeeLog, setCoffeeLog] = useState({}); // { 'YYYY-MM-DD': count }
   const [waterLog, setWaterLog] = useState({});   // { 'YYYY-MM-DD': count }
   const [waterGoal, setWaterGoal] = useState(8);
@@ -791,7 +791,19 @@ function App() {
       const wos = await loadKey('workouts', []);
       const aEntries = await loadKey('activityEntries', []);
       const k = await loadKey('apiKey', '');
-      const nts = await loadKey('notes', '');
+      const ntsRaw = await loadKey('notes', []);
+      // Migration: alter String → leeres Array; Array bleibt
+      let nts = Array.isArray(ntsRaw) ? ntsRaw : [];
+      // Startwerte aus deiner Liste einmalig hinzufügen wenn noch leer
+      if (nts.length === 0) {
+        nts = [
+          { id: 'n1', text: 'Strava-Integration', type: 'idea', done: false, createdAt: new Date().toISOString() },
+          { id: 'n2', text: 'Farbschema in Einstellungen änderbar', type: 'idea', done: false, createdAt: new Date().toISOString() },
+          { id: 'n3', text: 'Hinzufügen-Button nach oben, Auswertung nach unten', type: 'idea', done: false, createdAt: new Date().toISOString() },
+          { id: 'n4', text: 'Schrittzähler + kcal-Berechnung', type: 'idea', done: false, createdAt: new Date().toISOString() },
+          { id: 'n5', text: 'Makro-Balken mit Füllstand', type: 'idea', done: true, createdAt: new Date().toISOString() },
+        ];
+      }
       const sav = await loadKey('savedAnalyses', []);
       const cof = await loadKey('coffeeLog', {});
       const wat = await loadKey('waterLog', {});
@@ -1239,6 +1251,7 @@ function App() {
           onConfirmMany={async (copied) => {
             await persistEntries([...entries, ...copied]);
           }}
+          settings={settings}
           onRepeatYesterday={async (selectedSlots) => {
             const yKey = todayKey(new Date(Date.now() - 86400000));
             const yEntries = entries.filter(e => e.dateKey === yKey && (!selectedSlots || selectedSlots.has(e.slot)));
@@ -1986,7 +1999,7 @@ function ActivityEditor({ entry, activities, currentWeight, onSave, onDelete, on
   );
 }
 
-function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, showAlcohol = false, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0, onConfirmMany }) {
+function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, showAlcohol = false, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0, onConfirmMany, settings }) {
   const isToday = selectedDate === todayKey();
   const netConsumed = Math.max(0, consumed - burned);
   const pct = Math.min(100, (consumed / target) * 100); // Balken = gegessen (brutto)
@@ -2166,27 +2179,39 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
         </div>
 
         {(hasMacros || burned > 0) && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 20, marginTop: 18, flexWrap: 'wrap' }}>
-            {hasMacros && (
-              <>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontFamily: 'Inter', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.5)' }}>Eiweiß</div>
-                  <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 500, color: '#FAF6EC', marginTop: 2 }} className="num">{Math.round(totals.protein)}<span style={{ fontSize: 10, color: 'rgba(250,246,236,0.5)' }}>g</span></div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontFamily: 'Inter', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.5)' }}>KH</div>
-                  <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 500, color: '#FAF6EC', marginTop: 2 }} className="num">{Math.round(totals.carbs)}<span style={{ fontSize: 10, color: 'rgba(250,246,236,0.5)' }}>g</span></div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontFamily: 'Inter', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.5)' }}>Fett</div>
-                  <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 500, color: '#FAF6EC', marginTop: 2 }} className="num">{Math.round(totals.fat)}<span style={{ fontSize: 10, color: 'rgba(250,246,236,0.5)' }}>g</span></div>
-                </div>
-              </>
-            )}
+          <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {hasMacros && (() => {
+              // Zielwerte: Eiweiß 1.2g/kg, KH 45% kcal, Fett 30% kcal
+              const proteinGoal = Math.round((settings?.weight || 80) * 1.2);
+              const carbsGoal = Math.round(target * 0.45 / 4);
+              const fatGoal = Math.round(target * 0.30 / 9);
+              const macros = [
+                { label: 'Eiweiß', val: Math.round(totals.protein), goal: proteinGoal, unit: 'g' },
+                { label: 'KH', val: Math.round(totals.carbs), goal: carbsGoal, unit: 'g' },
+                { label: 'Fett', val: Math.round(totals.fat), goal: fatGoal, unit: 'g' },
+              ];
+              return macros.map(({ label, val, goal, unit }) => {
+                const pct = Math.min(100, Math.round(val / goal * 100));
+                const done = pct >= 100;
+                const color = done ? '#90C8A8' : pct > 60 ? '#FAF6EC' : 'rgba(250,246,236,0.7)';
+                return (
+                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ fontFamily: 'Inter', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.5)', width: 36, flexShrink: 0 }}>{label}</div>
+                    <div style={{ flex: 1, height: 6, background: 'rgba(250,246,236,0.12)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: pct + '%', background: done ? '#90C8A8' : '#FAF6EC', borderRadius: 3, transition: 'width 300ms ease' }} />
+                    </div>
+                    <div style={{ fontFamily: 'Fraunces', fontSize: 14, fontWeight: 600, color, minWidth: 60, textAlign: 'right' }} className="num">
+                      {val}<span style={{ fontSize: 9, opacity: 0.6 }}>/{goal}{unit}</span>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
             {burned > 0 && (
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontFamily: 'Inter', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.5)' }}>Verbrannt</div>
-                <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 500, color: '#FAF6EC', marginTop: 2 }} className="num">+{burned}<span style={{ fontSize: 10, color: 'rgba(250,246,236,0.5)' }}> kcal</span></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                <div style={{ fontFamily: 'Inter', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.5)', width: 36, flexShrink: 0 }}>Sport</div>
+                <div style={{ flex: 1 }} />
+                <div style={{ fontFamily: 'Fraunces', fontSize: 14, fontWeight: 600, color: '#90C8A8' }} className="num">+{burned} kcal</div>
               </div>
             )}
           </div>
@@ -5271,6 +5296,89 @@ function WeightChart({ weights }) {
 }
 
 // === CompactToggle ===
+// === TodoList: strukturierte Notizen mit Priorität ===
+function TodoList({ items = [], onChange }) {
+  const [newText, setNewText] = useState('');
+  const [newType, setNewType] = useState('idea');
+
+  const add = () => {
+    if (!newText.trim()) return;
+    const item = { id: crypto.randomUUID(), text: newText.trim(), type: newType, done: false, createdAt: new Date().toISOString() };
+    onChange([item, ...items]);
+    setNewText('');
+  };
+
+  const toggle = (id) => onChange(items.map(i => i.id === id ? { ...i, done: !i.done } : i));
+  const remove = (id) => onChange(items.filter(i => i.id !== id));
+  const setType = (id, type) => onChange(items.map(i => i.id === id ? { ...i, type } : i));
+
+  const open = items.filter(i => !i.done).sort((a, b) => (a.type === 'bug' ? -1 : 1) - (b.type === 'bug' ? -1 : 1));
+  const done = items.filter(i => i.done);
+
+  const typeIcon = (t) => t === 'bug' ? '🔴' : '🟡';
+  const typeLabel = (t) => t === 'bug' ? 'Bug' : 'Idee';
+
+  return (
+    <div>
+      {/* Neue Eingabe */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+        <button onClick={() => setNewType(newType === 'bug' ? 'idea' : 'bug')}
+          style={{ background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 8, padding: '0 10px', fontSize: 16, cursor: 'pointer', flexShrink: 0 }}>
+          {typeIcon(newType)}
+        </button>
+        <input value={newText} onChange={e => setNewText(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && add()}
+          placeholder={newType === 'bug' ? 'Bug beschreiben...' : 'Idee notieren...'}
+          style={{ ...styles.input, flex: 1 }} />
+        <button onClick={add} style={{ background: '#FAF6EC', color: '#0D3B2E', border: 'none', borderRadius: 8, padding: '0 14px', fontFamily: 'Inter', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>+</button>
+      </div>
+
+      {/* Offene Punkte */}
+      {open.map(item => (
+        <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(250,246,236,0.08)' }}>
+          <button onClick={() => toggle(item.id)}
+            style={{ width: 20, height: 20, borderRadius: 4, border: '2px solid rgba(250,246,236,0.4)', background: 'transparent', cursor: 'pointer', flexShrink: 0 }} />
+          <button onClick={() => setType(item.id, item.type === 'bug' ? 'idea' : 'bug')}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: 0, flexShrink: 0 }}>
+            {typeIcon(item.type)}
+          </button>
+          <span style={{ fontFamily: 'Inter', fontSize: 13, color: '#FAF6EC', flex: 1, lineHeight: 1.4 }}>{item.text}</span>
+          <button onClick={() => remove(item.id)}
+            style={{ background: 'none', border: 'none', color: 'rgba(250,246,236,0.3)', cursor: 'pointer', padding: 2 }}>
+            <X size={12} />
+          </button>
+        </div>
+      ))}
+
+      {open.length === 0 && (
+        <div style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.4)', textAlign: 'center', padding: '16px 0' }}>
+          Keine offenen Punkte 🎉
+        </div>
+      )}
+
+      {/* Erledigte */}
+      {done.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontFamily: 'Inter', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.3)', marginBottom: 8 }}>Erledigt ({done.length})</div>
+          {done.map(item => (
+            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', opacity: 0.4 }}>
+              <button onClick={() => toggle(item.id)}
+                style={{ width: 20, height: 20, borderRadius: 4, border: '2px solid rgba(250,246,236,0.4)', background: 'rgba(250,246,236,0.3)', cursor: 'pointer', flexShrink: 0 }}>
+                <span style={{ fontSize: 10, color: '#0D3B2E' }}>✓</span>
+              </button>
+              <span style={{ fontFamily: 'Inter', fontSize: 12, color: '#FAF6EC', flex: 1, textDecoration: 'line-through' }}>{item.text}</span>
+              <button onClick={() => remove(item.id)}
+                style={{ background: 'none', border: 'none', color: 'rgba(250,246,236,0.3)', cursor: 'pointer', padding: 2 }}>
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AlcoholToggle({ value, onChange }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -5478,10 +5586,10 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
           )}
         </div>
         <div>
-          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'rgba(250,246,236,0.6)', marginBottom: 10 }}>Notizen</div>
-          <textarea value={notes} onChange={e => onNotesChange(e.target.value)}
-            placeholder="Ideen, Wünsche..." rows={5}
-            style={{ ...styles.input, width: '100%', minHeight: 100, resize: 'vertical', fontFamily: 'Inter', fontSize: 14, lineHeight: 1.5, padding: '10px 12px' }} />
+          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'rgba(250,246,236,0.6)', marginBottom: 12 }}>
+            Todos &amp; Notizen <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, opacity: 0.7 }}>🔴 Bug · 🟡 Idee</span>
+          </div>
+          <TodoList items={Array.isArray(notes) ? notes : []} onChange={onNotesChange} />
         </div>
       </>}
 
