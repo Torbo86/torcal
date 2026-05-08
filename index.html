@@ -2621,9 +2621,15 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
               {hasFoodSelection && (
                 <CopyToDayButton
                   count={[...selectedIds].filter(id => id.startsWith('e:')).length}
-                  onCopy={(targetDate) => {
+                  onCopy={(targetDate, targetSlot) => {
                     const selected = entries.filter(e => selectedIds.has('e:' + e.id));
-                    const copied = selected.map(e => ({ ...e, id: crypto.randomUUID(), dateKey: targetDate, time: new Date().toISOString() }));
+                    const copied = selected.map(e => ({
+                      ...e,
+                      id: crypto.randomUUID(),
+                      dateKey: targetDate,
+                      time: new Date().toISOString(),
+                      ...(targetSlot ? { slot: targetSlot } : {}),
+                    }));
                     onConfirmMany(copied);
                     exitSelectMode();
                   }}
@@ -3821,22 +3827,36 @@ function CopyToDayButton({ count, onCopy }) {
     const d = new Date(); d.setDate(d.getDate() + 1);
     return todayKey(d);
   });
+  const [slot, setSlot] = useState('');
+
   if (!open) return (
     <button onClick={() => setOpen(true)} style={{ ...styles.secondary, flex: 1, marginTop: 0 }}>
       📋 An Tag kopieren
     </button>
   );
   return (
-    <div style={{ flex: 1, background: 'rgba(250,246,236,0.12)', borderRadius: 10, padding: '10px 12px', display: 'flex', gap: 8, alignItems: 'center' }}>
-      <input type="date" value={date} onChange={e => setDate(e.target.value)}
-        style={{ ...styles.input, flex: 1, padding: '6px 10px', fontSize: 13 }} />
-      <button onClick={() => { onCopy(date); setOpen(false); }}
-        style={{ background: '#FAF6EC', color: '#0D3B2E', border: 'none', borderRadius: 8, padding: '8px 14px', fontFamily: 'Inter', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-        ✓
-      </button>
-      <button onClick={() => setOpen(false)}
-        style={{ background: 'transparent', border: 'none', color: '#FAF6EC', cursor: 'pointer', padding: 4 }}>
-        <X size={14} />
+    <div style={{ flex: 1, background: 'rgba(250,246,236,0.12)', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)}
+          style={{ ...styles.input, flex: 1, padding: '6px 10px', fontSize: 13 }} />
+        <button onClick={() => setOpen(false)}
+          style={{ background: 'transparent', border: 'none', color: '#FAF6EC', cursor: 'pointer', padding: 4 }}>
+          <X size={14} />
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {['', 'Frühstück', 'Mittag', 'Snack', 'Abend'].map(s => (
+          <button key={s} onClick={() => setSlot(s)} style={{
+            flex: 1, padding: '5px 4px',
+            background: slot === s ? 'rgba(250,246,236,0.25)' : 'rgba(250,246,236,0.08)',
+            border: `1px solid ${slot === s ? 'rgba(250,246,236,0.5)' : 'rgba(250,246,236,0.15)'}`,
+            borderRadius: 6, color: '#FAF6EC', fontFamily: 'Inter', fontSize: 10, cursor: 'pointer',
+          }}>{s || '—'}</button>
+        ))}
+      </div>
+      <button onClick={() => { onCopy(date, slot || null); setOpen(false); }}
+        style={{ background: '#FAF6EC', color: '#0D3B2E', border: 'none', borderRadius: 8, padding: '8px', fontFamily: 'Inter', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+        ✓ Kopieren
       </button>
     </div>
   );
