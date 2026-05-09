@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.23c';
+const APP_VERSION = '3.23f';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -2260,6 +2260,8 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
         </div>
       )}
 
+
+
       {(isToday || selectedDate > todayKey()) && !selectMode && (
         <>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -2275,6 +2277,327 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
         </>
       )}
 
+
+      {bySlot.map(({ slot, items }) => {
+        const allSelected = items.every(i => selectedIds.has('e:' + i.id));
+        const someSelected = !allSelected && items.some(i => selectedIds.has('e:' + i.id));
+        const slotKcal = items.reduce((s, i) => s + i.kcal, 0);
+        const isCollapsed = collapsedSlots.has(slot) && !selectMode;
+        return (
+          <div key={slot} style={{ marginBottom: isCollapsed ? 8 : 20 }}>
+            {/* Slot-Header — klickbar zum Auf/Zuklappen */}
+            <div
+              onClick={selectMode
+                ? () => toggleSlotSelect(slot, items)
+                : () => toggleSlot(slot)}
+              style={{
+                fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2,
+                color: 'rgba(250,246,236,0.7)',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                cursor: 'pointer', userSelect: 'none',
+                padding: '6px 0',
+                marginBottom: isCollapsed ? 0 : 6,
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {selectMode && (
+                  <span style={{
+                    width: 18, height: 18, borderRadius: 4,
+                    border: `2px solid ${allSelected || someSelected ? '#FAF6EC' : 'rgba(250,246,236,0.4)'}`,
+                    background: allSelected ? '#FAF6EC' : someSelected ? 'rgba(250,246,236,0.3)' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#0D3B2E', fontSize: 12, fontWeight: 700,
+                  }}>
+                    {allSelected ? '✓' : someSelected ? '–' : ''}
+                  </span>
+                )}
+                <span>{slot}</span>
+                {!selectMode && (
+                  <span style={{ fontSize: 10, color: 'rgba(250,246,236,0.4)' }}>
+                    {isCollapsed ? '▸' : '▾'} {items.length} {items.length === 1 ? 'Eintrag' : 'Einträge'}
+                  </span>
+                )}
+              </span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="num" style={{ fontWeight: 600 }}>{slotKcal} kcal</span>
+                {!selectMode && (isToday || selectedDate > todayKey()) && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onAdd(slot); }}
+                    style={{
+                      width: 22, height: 22, borderRadius: '50%',
+                      background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)',
+                      color: '#FAF6EC', fontSize: 16, lineHeight: 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', padding: 0, flexShrink: 0,
+                    }}
+                  >+</button>
+                )}
+              </span>
+            </div>
+
+            {/* Einträge — ausgeblendet wenn collapsed */}
+            {!isCollapsed && items.map(e => {
+              const isSelected = selectedIds.has('e:' + e.id);
+              return compact ? (
+                // === KOMPAKT-MODUS ===
+                <div
+                  key={e.id}
+                  onClick={() => onTapEntry(e)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '6px 10px', marginBottom: 3,
+                    background: isSelected ? 'rgba(250,246,236,0.18)' : 'rgba(250,246,236,0.07)',
+                    borderRadius: 8, cursor: 'pointer',
+                    border: isSelected ? '1px solid rgba(250,246,236,0.4)' : '1px solid transparent',
+                    userSelect: 'none',
+                  }}
+                >
+                  {selectMode && (
+                    <span style={{
+                      width: 18, height: 18, borderRadius: '50%',
+                      border: `2px solid ${isSelected ? '#FAF6EC' : 'rgba(250,246,236,0.3)'}`,
+                      background: isSelected ? '#FAF6EC' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: '#0D3B2E', fontSize: 11, flexShrink: 0,
+                    }}>{isSelected ? '✓' : ''}</span>
+                  )}
+                  <span style={{ fontFamily: 'Fraunces', fontSize: 14, fontWeight: 500, color: '#FAF6EC', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.foodName}</span>
+                  <span style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.5)', flexShrink: 0 }} className="num">{e.qty}{e.unit}</span>
+                  <span style={{ fontFamily: 'Fraunces', fontSize: 15, fontWeight: 600, color: '#FAF6EC', flexShrink: 0 }} className="num">{e.kcal}</span>
+                  {!selectMode && (
+                    <button onClick={(ev) => { ev.stopPropagation(); onDelete(e.id); }}
+                      style={{ background: 'none', border: 'none', color: 'rgba(250,246,236,0.3)', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              ) : (
+                // === NORMAL-MODUS ===
+                <div
+                  key={e.id}
+                  onClick={() => onTapEntry(e)}
+                  style={{
+                    ...styles.entryRow,
+                    cursor: 'pointer',
+                    background: '#FAF6EC',
+                    borderColor: isSelected ? '#0D3B2E' : 'rgba(13,59,46,0.1)',
+                    borderWidth: isSelected ? 2 : 1,
+                    userSelect: 'none',
+                    marginBottom: 6,
+                  }}
+                >
+                  {selectMode && (
+                    <span style={{
+                      width: 22, height: 22, borderRadius: '50%',
+                      border: `2px solid ${isSelected ? '#0D3B2E' : 'rgba(13,59,46,0.3)'}`,
+                      background: isSelected ? '#0D3B2E' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: '#FAF6EC', fontSize: 13, fontWeight: 700,
+                      marginRight: 10, flexShrink: 0,
+                    }}>{isSelected ? '✓' : ''}</span>
+                  )}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 500 }}>{e.foodName}</div>
+                    <div style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', marginTop: 2 }} className="num">
+                      {e.qty} {e.unit} · {fmtTime(e.time)}
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 500, marginRight: selectMode ? 0 : 12 }} className="num">{e.kcal}</div>
+                  {!selectMode && (
+                    <button style={{ ...styles.iconBtnSmall, color: '#5C6B5E' }} onClick={(ev) => { ev.stopPropagation(); onDelete(e.id); }}><Trash2 size={16} /></button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+      {/* === Bewegung-Sektion ganz unten === */}
+      {dayActivityEntries.length > 0 && (
+        <div style={{ marginBottom: 24, marginTop: 32, paddingTop: 16, borderTop: '1px solid rgba(250,246,236,0.1)' }}>
+          <div
+            onClick={selectMode ? () => {
+              // Aktivitäten in selectMode auswählen toggle
+              const next = new Set(selectedIds);
+              const allSelected = dayActivityEntries.every(a => next.has('a:' + a.id));
+              if (allSelected) {
+                dayActivityEntries.forEach(a => next.delete('a:' + a.id));
+              } else {
+                dayActivityEntries.forEach(a => next.add('a:' + a.id));
+              }
+              setSelectedIds(next);
+            } : undefined}
+            style={{
+              fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2,
+              color: 'rgba(250,246,236,0.7)', marginBottom: 8,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              cursor: selectMode ? 'pointer' : 'default', userSelect: 'none',
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {selectMode && (
+                <span style={{
+                  width: 18, height: 18, borderRadius: 4,
+                  border: `2px solid ${dayActivityEntries.every(a => selectedIds.has('a:' + a.id)) ? '#FAF6EC' : 'rgba(250,246,236,0.4)'}`,
+                  background: dayActivityEntries.every(a => selectedIds.has('a:' + a.id)) ? '#FAF6EC' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: '#0D3B2E', fontSize: 12, fontWeight: 700,
+                }}>
+                  {dayActivityEntries.every(a => selectedIds.has('a:' + a.id)) ? '✓' : ''}
+                </span>
+              )}
+              Bewegung
+            </span>
+            <span className="num">+{burned} kcal</span>
+          </div>
+          {dayActivityEntries.map(a => {
+            const isSelected = selectedIds.has('a:' + a.id);
+            return (
+              <div
+                key={a.id}
+                onClick={() => {
+                  if (selectMode) {
+                    const next = new Set(selectedIds);
+                    if (next.has('a:' + a.id)) next.delete('a:' + a.id); else next.add('a:' + a.id);
+                    setSelectedIds(next);
+                  } else {
+                    setEditingActivity(a);
+                  }
+                }}
+                style={{
+                  ...styles.entryRow,
+                  cursor: 'pointer',
+                  background: '#FAF6EC',
+                  borderColor: isSelected ? '#0D3B2E' : 'rgba(13,59,46,0.1)',
+                  borderWidth: isSelected ? 2 : 1,
+                  userSelect: 'none',
+                }}
+              >
+                {selectMode && (
+                  <span style={{
+                    width: 22, height: 22, borderRadius: '50%',
+                    border: `2px solid ${isSelected ? '#0D3B2E' : 'rgba(13,59,46,0.3)'}`,
+                    background: isSelected ? '#0D3B2E' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#FAF6EC', fontSize: 13, fontWeight: 700,
+                    marginRight: 10, flexShrink: 0,
+                  }}>{isSelected ? '✓' : ''}</span>
+                )}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 500 }}>{a.activityName}</div>
+                  <div style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', marginTop: 2 }} className="num">
+                    {a.durationMin} min · {fmtTime(a.time)}
+                  </div>
+                </div>
+                <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 500, marginRight: selectMode ? 0 : 12, color: '#0D3B2E' }} className="num">+{a.kcal}</div>
+                {!selectMode && (
+                  <button style={{ ...styles.iconBtnSmall, color: '#5C6B5E' }} onClick={(ev) => { ev.stopPropagation(); onDeleteActivity(a.id); }}><Trash2 size={16} /></button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {isToday && !selectMode && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+          {/* Kaffee-Tracker */}
+          <div style={{
+            flex: 1, minWidth: 0,
+            background: 'rgba(250,246,236,0.08)',
+            border: '1px solid rgba(250,246,236,0.15)',
+            borderRadius: 12, padding: '10px 10px',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>☕</span>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Kaffee</div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
+                {coffeeCount} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{COFFEE_KCAL} kcal</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+              <button onClick={onCoffeeRemove} disabled={coffeeCount === 0} style={{
+                width: 30, height: 30, borderRadius: 6,
+                background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)',
+                color: '#FAF6EC', fontSize: 18, cursor: coffeeCount === 0 ? 'default' : 'pointer',
+                opacity: coffeeCount === 0 ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+              }}>−</button>
+              <button onClick={onCoffeeAdd} style={{
+                width: 30, height: 30, borderRadius: 6,
+                background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)',
+                color: '#FAF6EC', fontSize: 18, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+              }}>+</button>
+            </div>
+          </div>
+
+          {/* Wasser-Tracker */}
+          <div style={{
+            flex: 1, minWidth: 0,
+            background: 'rgba(250,246,236,0.08)',
+            border: '1px solid rgba(250,246,236,0.15)',
+            borderRadius: 12, padding: '10px 10px',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>💧</span>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Wasser</div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: waterCount >= waterGoal ? '#90C8A8' : '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
+                {waterCount}/{waterGoal}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+              <button onClick={onWaterRemove} disabled={waterCount === 0} style={{
+                width: 30, height: 30, borderRadius: 6,
+                background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)',
+                color: '#FAF6EC', fontSize: 18, cursor: waterCount === 0 ? 'default' : 'pointer',
+                opacity: waterCount === 0 ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+              }}>−</button>
+              <button onClick={onWaterAdd} style={{
+                width: 30, height: 30, borderRadius: 6,
+                background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)',
+                color: '#FAF6EC', fontSize: 18, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+              }}>+</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alkohol-Kachel — nur wenn aktiviert */}
+      {isToday && !selectMode && showAlcohol && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+          {/* Bier */}
+          <div style={{ flex: 1, minWidth: 0, background: 'rgba(250,246,236,0.08)', border: '1px solid rgba(250,246,236,0.15)', borderRadius: 12, padding: '10px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>🍺</span>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Bier</div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
+                {alcoholDay.beer || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>× 330ml</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+              <button onClick={() => onAlcoholRemove('beer')} disabled={!alcoholDay.beer} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', color: '#FAF6EC', fontSize: 18, cursor: !alcoholDay.beer ? 'default' : 'pointer', opacity: !alcoholDay.beer ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>−</button>
+              <button onClick={() => onAlcoholAdd('beer')} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)', color: '#FAF6EC', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
+            </div>
+          </div>
+          {/* Wein */}
+          <div style={{ flex: 1, minWidth: 0, background: 'rgba(250,246,236,0.08)', border: '1px solid rgba(250,246,236,0.15)', borderRadius: 12, padding: '10px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>🥂</span>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Wein</div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
+                {alcoholDay.cremant || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>× 200ml</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+              <button onClick={() => onAlcoholRemove('cremant')} disabled={!alcoholDay.cremant} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', color: '#FAF6EC', fontSize: 18, cursor: !alcoholDay.cremant ? 'default' : 'pointer', opacity: !alcoholDay.cremant ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>−</button>
+              <button onClick={() => onAlcoholAdd('cremant')} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)', color: '#FAF6EC', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!isToday && selectedDate < todayKey() && entries.length > 0 && !selectMode && (
         <button style={styles.secondary} onClick={() => setSelectMode(true)}>Auswählen</button>
@@ -6105,326 +6428,3 @@ const styles = {
   </script>
 </body>
 </html>
-
-      {bySlot.map(({ slot, items }) => {
-        const allSelected = items.every(i => selectedIds.has('e:' + i.id));
-        const someSelected = !allSelected && items.some(i => selectedIds.has('e:' + i.id));
-        const slotKcal = items.reduce((s, i) => s + i.kcal, 0);
-        const isCollapsed = collapsedSlots.has(slot) && !selectMode;
-        return (
-          <div key={slot} style={{ marginBottom: isCollapsed ? 8 : 20 }}>
-            {/* Slot-Header — klickbar zum Auf/Zuklappen */}
-            <div
-              onClick={selectMode
-                ? () => toggleSlotSelect(slot, items)
-                : () => toggleSlot(slot)}
-              style={{
-                fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2,
-                color: 'rgba(250,246,236,0.7)',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                cursor: 'pointer', userSelect: 'none',
-                padding: '6px 0',
-                marginBottom: isCollapsed ? 0 : 6,
-              }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {selectMode && (
-                  <span style={{
-                    width: 18, height: 18, borderRadius: 4,
-                    border: `2px solid ${allSelected || someSelected ? '#FAF6EC' : 'rgba(250,246,236,0.4)'}`,
-                    background: allSelected ? '#FAF6EC' : someSelected ? 'rgba(250,246,236,0.3)' : 'transparent',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: '#0D3B2E', fontSize: 12, fontWeight: 700,
-                  }}>
-                    {allSelected ? '✓' : someSelected ? '–' : ''}
-                  </span>
-                )}
-                <span>{slot}</span>
-                {!selectMode && (
-                  <span style={{ fontSize: 10, color: 'rgba(250,246,236,0.4)' }}>
-                    {isCollapsed ? '▸' : '▾'} {items.length} {items.length === 1 ? 'Eintrag' : 'Einträge'}
-                  </span>
-                )}
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="num" style={{ fontWeight: 600 }}>{slotKcal} kcal</span>
-                {!selectMode && (isToday || selectedDate > todayKey()) && (
-                  <button
-                    onClick={e => { e.stopPropagation(); onAdd(slot); }}
-                    style={{
-                      width: 22, height: 22, borderRadius: '50%',
-                      background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)',
-                      color: '#FAF6EC', fontSize: 16, lineHeight: 1,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: 'pointer', padding: 0, flexShrink: 0,
-                    }}
-                  >+</button>
-                )}
-              </span>
-            </div>
-
-            {/* Einträge — ausgeblendet wenn collapsed */}
-            {!isCollapsed && items.map(e => {
-              const isSelected = selectedIds.has('e:' + e.id);
-              return compact ? (
-                // === KOMPAKT-MODUS ===
-                <div
-                  key={e.id}
-                  onClick={() => onTapEntry(e)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '6px 10px', marginBottom: 3,
-                    background: isSelected ? 'rgba(250,246,236,0.18)' : 'rgba(250,246,236,0.07)',
-                    borderRadius: 8, cursor: 'pointer',
-                    border: isSelected ? '1px solid rgba(250,246,236,0.4)' : '1px solid transparent',
-                    userSelect: 'none',
-                  }}
-                >
-                  {selectMode && (
-                    <span style={{
-                      width: 18, height: 18, borderRadius: '50%',
-                      border: `2px solid ${isSelected ? '#FAF6EC' : 'rgba(250,246,236,0.3)'}`,
-                      background: isSelected ? '#FAF6EC' : 'transparent',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: '#0D3B2E', fontSize: 11, flexShrink: 0,
-                    }}>{isSelected ? '✓' : ''}</span>
-                  )}
-                  <span style={{ fontFamily: 'Fraunces', fontSize: 14, fontWeight: 500, color: '#FAF6EC', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.foodName}</span>
-                  <span style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.5)', flexShrink: 0 }} className="num">{e.qty}{e.unit}</span>
-                  <span style={{ fontFamily: 'Fraunces', fontSize: 15, fontWeight: 600, color: '#FAF6EC', flexShrink: 0 }} className="num">{e.kcal}</span>
-                  {!selectMode && (
-                    <button onClick={(ev) => { ev.stopPropagation(); onDelete(e.id); }}
-                      style={{ background: 'none', border: 'none', color: 'rgba(250,246,236,0.3)', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-              ) : (
-                // === NORMAL-MODUS ===
-                <div
-                  key={e.id}
-                  onClick={() => onTapEntry(e)}
-                  style={{
-                    ...styles.entryRow,
-                    cursor: 'pointer',
-                    background: '#FAF6EC',
-                    borderColor: isSelected ? '#0D3B2E' : 'rgba(13,59,46,0.1)',
-                    borderWidth: isSelected ? 2 : 1,
-                    userSelect: 'none',
-                    marginBottom: 6,
-                  }}
-                >
-                  {selectMode && (
-                    <span style={{
-                      width: 22, height: 22, borderRadius: '50%',
-                      border: `2px solid ${isSelected ? '#0D3B2E' : 'rgba(13,59,46,0.3)'}`,
-                      background: isSelected ? '#0D3B2E' : 'transparent',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: '#FAF6EC', fontSize: 13, fontWeight: 700,
-                      marginRight: 10, flexShrink: 0,
-                    }}>{isSelected ? '✓' : ''}</span>
-                  )}
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 500 }}>{e.foodName}</div>
-                    <div style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', marginTop: 2 }} className="num">
-                      {e.qty} {e.unit} · {fmtTime(e.time)}
-                    </div>
-                  </div>
-                  <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 500, marginRight: selectMode ? 0 : 12 }} className="num">{e.kcal}</div>
-                  {!selectMode && (
-                    <button style={{ ...styles.iconBtnSmall, color: '#5C6B5E' }} onClick={(ev) => { ev.stopPropagation(); onDelete(e.id); }}><Trash2 size={16} /></button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
-      {/* === Bewegung-Sektion ganz unten === */}
-      {dayActivityEntries.length > 0 && (
-        <div style={{ marginBottom: 24, marginTop: 32, paddingTop: 16, borderTop: '1px solid rgba(250,246,236,0.1)' }}>
-          <div
-            onClick={selectMode ? () => {
-              // Aktivitäten in selectMode auswählen toggle
-              const next = new Set(selectedIds);
-              const allSelected = dayActivityEntries.every(a => next.has('a:' + a.id));
-              if (allSelected) {
-                dayActivityEntries.forEach(a => next.delete('a:' + a.id));
-              } else {
-                dayActivityEntries.forEach(a => next.add('a:' + a.id));
-              }
-              setSelectedIds(next);
-            } : undefined}
-            style={{
-              fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2,
-              color: 'rgba(250,246,236,0.7)', marginBottom: 8,
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              cursor: selectMode ? 'pointer' : 'default', userSelect: 'none',
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {selectMode && (
-                <span style={{
-                  width: 18, height: 18, borderRadius: 4,
-                  border: `2px solid ${dayActivityEntries.every(a => selectedIds.has('a:' + a.id)) ? '#FAF6EC' : 'rgba(250,246,236,0.4)'}`,
-                  background: dayActivityEntries.every(a => selectedIds.has('a:' + a.id)) ? '#FAF6EC' : 'transparent',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: '#0D3B2E', fontSize: 12, fontWeight: 700,
-                }}>
-                  {dayActivityEntries.every(a => selectedIds.has('a:' + a.id)) ? '✓' : ''}
-                </span>
-              )}
-              Bewegung
-            </span>
-            <span className="num">+{burned} kcal</span>
-          </div>
-          {dayActivityEntries.map(a => {
-            const isSelected = selectedIds.has('a:' + a.id);
-            return (
-              <div
-                key={a.id}
-                onClick={() => {
-                  if (selectMode) {
-                    const next = new Set(selectedIds);
-                    if (next.has('a:' + a.id)) next.delete('a:' + a.id); else next.add('a:' + a.id);
-                    setSelectedIds(next);
-                  } else {
-                    setEditingActivity(a);
-                  }
-                }}
-                style={{
-                  ...styles.entryRow,
-                  cursor: 'pointer',
-                  background: '#FAF6EC',
-                  borderColor: isSelected ? '#0D3B2E' : 'rgba(13,59,46,0.1)',
-                  borderWidth: isSelected ? 2 : 1,
-                  userSelect: 'none',
-                }}
-              >
-                {selectMode && (
-                  <span style={{
-                    width: 22, height: 22, borderRadius: '50%',
-                    border: `2px solid ${isSelected ? '#0D3B2E' : 'rgba(13,59,46,0.3)'}`,
-                    background: isSelected ? '#0D3B2E' : 'transparent',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: '#FAF6EC', fontSize: 13, fontWeight: 700,
-                    marginRight: 10, flexShrink: 0,
-                  }}>{isSelected ? '✓' : ''}</span>
-                )}
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 500 }}>{a.activityName}</div>
-                  <div style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', marginTop: 2 }} className="num">
-                    {a.durationMin} min · {fmtTime(a.time)}
-                  </div>
-                </div>
-                <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 500, marginRight: selectMode ? 0 : 12, color: '#0D3B2E' }} className="num">+{a.kcal}</div>
-                {!selectMode && (
-                  <button style={{ ...styles.iconBtnSmall, color: '#5C6B5E' }} onClick={(ev) => { ev.stopPropagation(); onDeleteActivity(a.id); }}><Trash2 size={16} /></button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {isToday && !selectMode && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
-          {/* Kaffee-Tracker */}
-          <div style={{
-            flex: 1, minWidth: 0,
-            background: 'rgba(250,246,236,0.08)',
-            border: '1px solid rgba(250,246,236,0.15)',
-            borderRadius: 12, padding: '10px 10px',
-            display: 'flex', alignItems: 'center', gap: 6,
-          }}>
-            <span style={{ fontSize: 20, flexShrink: 0 }}>☕</span>
-            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Kaffee</div>
-              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
-                {coffeeCount} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{COFFEE_KCAL} kcal</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-              <button onClick={onCoffeeRemove} disabled={coffeeCount === 0} style={{
-                width: 30, height: 30, borderRadius: 6,
-                background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)',
-                color: '#FAF6EC', fontSize: 18, cursor: coffeeCount === 0 ? 'default' : 'pointer',
-                opacity: coffeeCount === 0 ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-              }}>−</button>
-              <button onClick={onCoffeeAdd} style={{
-                width: 30, height: 30, borderRadius: 6,
-                background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)',
-                color: '#FAF6EC', fontSize: 18, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-              }}>+</button>
-            </div>
-          </div>
-
-          {/* Wasser-Tracker */}
-          <div style={{
-            flex: 1, minWidth: 0,
-            background: 'rgba(250,246,236,0.08)',
-            border: '1px solid rgba(250,246,236,0.15)',
-            borderRadius: 12, padding: '10px 10px',
-            display: 'flex', alignItems: 'center', gap: 6,
-          }}>
-            <span style={{ fontSize: 20, flexShrink: 0 }}>💧</span>
-            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Wasser</div>
-              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: waterCount >= waterGoal ? '#90C8A8' : '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
-                {waterCount}/{waterGoal}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-              <button onClick={onWaterRemove} disabled={waterCount === 0} style={{
-                width: 30, height: 30, borderRadius: 6,
-                background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)',
-                color: '#FAF6EC', fontSize: 18, cursor: waterCount === 0 ? 'default' : 'pointer',
-                opacity: waterCount === 0 ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-              }}>−</button>
-              <button onClick={onWaterAdd} style={{
-                width: 30, height: 30, borderRadius: 6,
-                background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)',
-                color: '#FAF6EC', fontSize: 18, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-              }}>+</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Alkohol-Kachel — nur wenn aktiviert */}
-      {isToday && !selectMode && showAlcohol && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
-          {/* Bier */}
-          <div style={{ flex: 1, minWidth: 0, background: 'rgba(250,246,236,0.08)', border: '1px solid rgba(250,246,236,0.15)', borderRadius: 12, padding: '10px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 20, flexShrink: 0 }}>🍺</span>
-            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Bier</div>
-              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
-                {alcoholDay.beer || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>× 330ml</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-              <button onClick={() => onAlcoholRemove('beer')} disabled={!alcoholDay.beer} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', color: '#FAF6EC', fontSize: 18, cursor: !alcoholDay.beer ? 'default' : 'pointer', opacity: !alcoholDay.beer ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>−</button>
-              <button onClick={() => onAlcoholAdd('beer')} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)', color: '#FAF6EC', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
-            </div>
-          </div>
-          {/* Wein */}
-          <div style={{ flex: 1, minWidth: 0, background: 'rgba(250,246,236,0.08)', border: '1px solid rgba(250,246,236,0.15)', borderRadius: 12, padding: '10px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 20, flexShrink: 0 }}>🥂</span>
-            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Wein</div>
-              <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
-                {alcoholDay.cremant || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>× 200ml</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-              <button onClick={() => onAlcoholRemove('cremant')} disabled={!alcoholDay.cremant} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.2)', color: '#FAF6EC', fontSize: 18, cursor: !alcoholDay.cremant ? 'default' : 'pointer', opacity: !alcoholDay.cremant ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>−</button>
-              <button onClick={() => onAlcoholAdd('cremant')} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)', color: '#FAF6EC', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-
