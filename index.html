@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.21i';
+const APP_VERSION = '3.21j';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -3534,7 +3534,7 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
             />
           </div>
           {searchResults.length > 0 && (
-            <div style={{ background: 'white', border: '1px solid #D8D2C2', borderRadius: 8, marginTop: 8 }}>
+            <div style={{ background: 'white', border: '1px solid #D8D2C2', borderRadius: 8, marginTop: 8, maxHeight: '60vh', overflowY: 'auto' }}>
               {searchResults.map(f => (
                 <div key={f.id} onClick={() => addFromSearch(f)} style={{ padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #E5DFD2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontFamily: 'Fraunces', fontSize: 16 }}>{f.name}</span>
@@ -6321,6 +6321,7 @@ const styles = {
     fontFamily: 'Inter, sans-serif',
     maxWidth: 480, margin: '0 auto',
     backgroundImage: 'radial-gradient(circle at top, #1A5340 0%, #0D3B2E 60%, #0A2E22 100%)',
+    overflowY: 'auto',
   },
   page: { padding: '20px 20px 24px', flex: 1 },
   h1: { fontFamily: 'Fraunces, serif', fontSize: 32, fontWeight: 600, margin: '8px 0 4px', letterSpacing: -0.5, color: '#FAF6EC' },
