@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.21h';
+const APP_VERSION = '3.21i';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -984,8 +984,6 @@ function App() {
             if (data.savedAnalyses) await persistSavedAnalyses(data.savedAnalyses);
             if (data.coffeeLog) await persistCoffeeLog(data.coffeeLog);
             if (data.waterLog) await persistWaterLog(data.waterLog);
-            if (data.alcoholLog) await persistAlcoholLog(data.alcoholLog);
-            if (data.intimacyLog) await persistIntimacyLog(data.intimacyLog);
             setView('today');
           }}
         />
@@ -3536,7 +3534,7 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
             />
           </div>
           {searchResults.length > 0 && (
-            <div style={{ background: 'white', border: '1px solid #D8D2C2', borderRadius: 8, marginTop: 8, maxHeight: '60vh', overflowY: 'auto' }}>
+            <div style={{ background: 'white', border: '1px solid #D8D2C2', borderRadius: 8, marginTop: 8 }}>
               {searchResults.map(f => (
                 <div key={f.id} onClick={() => addFromSearch(f)} style={{ padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #E5DFD2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontFamily: 'Fraunces', fontSize: 16 }}>{f.name}</span>
