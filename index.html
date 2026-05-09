@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.22g-debug';
+const APP_VERSION = '3.22h';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -2570,8 +2570,8 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
       {(isToday || selectedDate > todayKey()) && !selectMode && (
         <>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button style={{ ...styles.primary, flex: 1 }} onClick={onAdd}><Plus size={18} style={{ marginRight: 8 }} /> {selectedDate > todayKey() ? 'Planen' : 'Hinzufügen'}</button>
-            <button style={{ ...styles.primary, width: 64, padding: 16 }} onClick={onAddSpeech} aria-label="Spracheingabe"><Mic size={20} /></button>
+            <button style={{ ...styles.primary, flex: 1 }} onClick={() => onAdd(null)}><Plus size={18} style={{ marginRight: 8 }} /> {selectedDate > todayKey() ? 'Planen' : 'Hinzufügen'}</button>
+            <button style={{ ...styles.primary, width: 64, padding: 16 }} onClick={() => onAddSpeech()} aria-label="Spracheingabe"><Mic size={20} /></button>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             {isToday && <button style={{ ...styles.secondary, flex: 1 }} onClick={() => setShowRepeatPicker(true)}>Wie gestern</button>}
@@ -3372,7 +3372,6 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
       };
     });
 
-    alert('DEBUG2: finalEntries.length=' + finalEntries.length + ', slot=' + finalEntries[0]?.slot + ', dateKey=' + finalEntries[0]?.dateKey + ', kcal=' + finalEntries[0]?.kcal);
     onConfirm(finalEntries, newGlossary);
   };
 
