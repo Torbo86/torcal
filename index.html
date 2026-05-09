@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.22h';
+const APP_VERSION = '3.22i';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -830,6 +830,20 @@ function App() {
       setIntimacyLog(intim);
       setShowAlcohol(showAlc);
       setShowIntimacy(showInt);
+      // Einmalige Bereinigung: Einträge mit ungültigem Slot reparieren
+      const validSlots = ['Frühstück', 'Mittag', 'Snack', 'Abend'];
+      const needsClean = e.some(entry => !validSlots.includes(entry.slot));
+      if (needsClean) {
+        const cleaned = e.map(entry => {
+          if (validSlots.includes(entry.slot)) return entry;
+          // Slot aus Uhrzeit ableiten
+          const h = new Date(entry.time || entry.dateKey).getHours();
+          const slot = h < 10 ? 'Frühstück' : h < 14 ? 'Mittag' : h < 17 ? 'Snack' : 'Abend';
+          return { ...entry, slot };
+        });
+        await saveKey('entries', cleaned);
+        setEntries(cleaned);
+      }
       setLoaded(true);
       if (!s) setView('setup');
     })();
