@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.22f-debug';
+const APP_VERSION = '3.22g-debug';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -3321,7 +3321,6 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
   };
 
   const handleConfirm = () => {
-    alert('DEBUG: handleConfirm aufgerufen, parsed.length=' + parsed.length + ', dateKey=' + entryDate);
     const newGlossary = [];
     // Datum: entryDate direkt + dateOffset
     let dateKey = entryDate;
@@ -3373,6 +3372,7 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
       };
     });
 
+    alert('DEBUG2: finalEntries.length=' + finalEntries.length + ', slot=' + finalEntries[0]?.slot + ', dateKey=' + finalEntries[0]?.dateKey + ', kcal=' + finalEntries[0]?.kcal);
     onConfirm(finalEntries, newGlossary);
   };
 
