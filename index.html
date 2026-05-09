@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.21g';
+const APP_VERSION = '3.21h';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -984,6 +984,8 @@ function App() {
             if (data.savedAnalyses) await persistSavedAnalyses(data.savedAnalyses);
             if (data.coffeeLog) await persistCoffeeLog(data.coffeeLog);
             if (data.waterLog) await persistWaterLog(data.waterLog);
+            if (data.alcoholLog) await persistAlcoholLog(data.alcoholLog);
+            if (data.intimacyLog) await persistIntimacyLog(data.intimacyLog);
             setView('today');
           }}
         />
@@ -1496,6 +1498,8 @@ function App() {
           onWaterGoalChange={persistWaterGoal}
           showAlcohol={showAlcohol}
           onShowAlcoholChange={persistShowAlcohol}
+          alcoholLog={alcoholLog}
+          intimacyLog={intimacyLog}
           savedAnalyses={savedAnalyses}
           apiKey={apiKey}
           onApiKeyChange={persistApiKey}
@@ -5477,7 +5481,7 @@ function ApiStatus({ apiKey }) {
 }
 
 // === Settings ===
-function SettingsView({ settings, entries, glossary, dishes = [], weights = [], activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, showAlcohol = false, onShowAlcoholChange, apiKey = '', onApiKeyChange, onSave, onBack, onImport }) {
+function SettingsView({ settings, entries, glossary, dishes = [], weights = [], activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, showAlcohol = false, onShowAlcoholChange, alcoholLog = {}, intimacyLog = [], apiKey = '', onApiKeyChange, onSave, onBack, onImport }) {
   const [s, setS] = useState(settings);
   const [keyInput, setKeyInput] = useState(apiKey);
   const [keyVisible, setKeyVisible] = useState(false);
@@ -6364,18 +6368,8 @@ const styles = {
 };
 
 
-    window.addEventListener('error', e => {
-      document.getElementById('root').innerHTML = '<div style="background:#c00;color:#fff;padding:20px;font-family:monospace;white-space:pre-wrap;font-size:11px">ERROR: ' + (e.error ? e.error.stack : e.message) + '</div>';
-    });
-    window.addEventListener('unhandledrejection', e => {
-      document.getElementById('root').innerHTML = '<div style="background:#c60;color:#fff;padding:20px;font-family:monospace;white-space:pre-wrap;font-size:11px">PROMISE: ' + (e.reason && e.reason.stack || e.reason) + '</div>';
-    });
-    try {
-      const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(React.createElement(App));
-    } catch(e) {
-      document.getElementById('root').innerHTML = '<div style="background:#c00;color:#fff;padding:20px;font-family:monospace;white-space:pre-wrap;font-size:11px">RENDER: ' + e.stack + '</div>';
-    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(App));
   </script>
 </body>
 </html>
