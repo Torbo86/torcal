@@ -131,13 +131,13 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.24d';
+const APP_VERSION = '3.25';
 const APP_NAME = 'Torcal';
-const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
+const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
 const WATER_GOAL = 8;   // Gläser pro Tag
-const BEER_KCAL = 145;     // 330ml Bier
-const CREMANT_KCAL = 170;  // 200ml Crémant
+const BEER_KCAL_DEFAULT = 145;     // 330ml Bier
+const CREMANT_KCAL_DEFAULT = 170;  // 200ml Crémant
 
 const todayKey = (d = new Date()) => d.toISOString().slice(0, 10);
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -727,6 +727,10 @@ function App() {
   const [waterLog, setWaterLog] = useState({});   // { 'YYYY-MM-DD': count }
   const [waterGoal, setWaterGoal] = useState(8);
   const [alcoholLog, setAlcoholLog] = useState({}); // { 'YYYY-MM-DD': { beer: n, cremant: n } }
+  const [alcoholActiveDays, setAlcoholActiveDays] = useState({}); // { 'YYYY-MM-DD': true } - Tage, an denen Alkohol-Tracker aktiv ist
+  const [beerKcal, setBeerKcal] = useState(BEER_KCAL_DEFAULT);
+  const [cremantKcal, setCremantKcal] = useState(CREMANT_KCAL_DEFAULT);
+  const [coffeeKcal, setCoffeeKcal] = useState(COFFEE_KCAL_DEFAULT);
   const [intimacyLog, setIntimacyLog] = useState([]); // [{id, date, note}]
   const [showAlcohol, setShowAlcohol] = useState(false); // in Einstellungen aktivierbar
   const [showIntimacy, setShowIntimacy] = useState(false); // versteckt aktivierbar
@@ -904,6 +908,10 @@ function App() {
       const wat = await loadKey('waterLog', {});
       const wg = await loadKey('waterGoal', 8);
       const alc = await loadKey('alcoholLog', {});
+      const alcDays = await loadKey('alcoholActiveDays', {});
+      const bkc = await loadKey('beerKcal', BEER_KCAL_DEFAULT);
+      const ckc = await loadKey('cremantKcal', CREMANT_KCAL_DEFAULT);
+      const cofkc = await loadKey('coffeeKcal', COFFEE_KCAL_DEFAULT);
       const intim = await loadKey('intimacyLog', []);
       const showAlc = await loadKey('showAlcohol', false);
       const showInt = await loadKey('showIntimacy', false);
@@ -922,6 +930,10 @@ function App() {
       setWaterLog(wat);
       setWaterGoal(wg);
       setAlcoholLog(alc);
+      setAlcoholActiveDays(alcDays);
+      setBeerKcal(bkc);
+      setCremantKcal(ckc);
+      setCoffeeKcal(cofkc);
       setIntimacyLog(intim);
       setShowAlcohol(showAlc);
       setShowIntimacy(showInt);
@@ -955,6 +967,10 @@ function App() {
   const persistWaterLog = async (next) => { setWaterLog(next); await saveKey('waterLog', next); };
   const persistWaterGoal = async (next) => { setWaterGoal(next); await saveKey('waterGoal', next); };
   const persistAlcoholLog = async (next) => { setAlcoholLog(next); await saveKey('alcoholLog', next); };
+  const persistAlcoholActiveDays = async (next) => { setAlcoholActiveDays(next); await saveKey('alcoholActiveDays', next); };
+  const persistBeerKcal = async (next) => { setBeerKcal(next); await saveKey('beerKcal', next); };
+  const persistCremantKcal = async (next) => { setCremantKcal(next); await saveKey('cremantKcal', next); };
+  const persistCoffeeKcal = async (next) => { setCoffeeKcal(next); await saveKey('coffeeKcal', next); };
   const persistIntimacyLog = async (next) => { setIntimacyLog(next); await saveKey('intimacyLog', next); };
   const persistShowAlcohol = async (next) => { setShowAlcohol(next); await saveKey('showAlcohol', next); };
   const persistShowIntimacy = async (next) => { setShowIntimacy(next); await saveKey('showIntimacy', next); };
@@ -1126,7 +1142,7 @@ function App() {
             const next = { ...coffeeLog, [date]: prev + 1 };
             await persistCoffeeLog(next);
             const newCount = prev + 1;
-            const newKcal = newCount * COFFEE_KCAL;
+            const newKcal = newCount * coffeeKcal;
             // Bestehenden Kaffee-Eintrag aktualisieren oder neu anlegen
             const existing = entries.find(e => e.isCoffee && e.dateKey === date);
             if (existing) {
@@ -1159,7 +1175,7 @@ function App() {
               await persistEntries(entries.filter(e => e.id !== existing.id));
             } else {
               await persistEntries(entries.map(e => e.id === existing.id
-                ? { ...e, qty: newCount, kcal: newCount * COFFEE_KCAL, foodName: `Kaffee mit Milch ×${newCount}` }
+                ? { ...e, qty: newCount, kcal: newCount * coffeeKcal, foodName: `Kaffee mit Milch ×${newCount}` }
                 : e));
             }
           }}
@@ -1175,7 +1191,24 @@ function App() {
             await persistWaterLog({ ...waterLog, [date]: prev - 1 });
           }}
           waterGoal={waterGoal}
-          showAlcohol={showAlcohol}
+          alcoholActiveToday={(() => {
+            // Sichtbar wenn: für diesen Tag aktiviert ODER bereits Einträge für diesen Tag
+            if (alcoholActiveDays[selectedDate]) return true;
+            const day = alcoholLog[selectedDate] || {};
+            if ((day.beer || 0) > 0 || (day.cremant || 0) > 0) return true;
+            return false;
+          })()}
+          onAlcoholActivate={async () => {
+            await persistAlcoholActiveDays({ ...alcoholActiveDays, [selectedDate]: true });
+          }}
+          onAlcoholDeactivate={async () => {
+            const next = { ...alcoholActiveDays };
+            delete next[selectedDate];
+            await persistAlcoholActiveDays(next);
+          }}
+          beerKcal={beerKcal}
+          cremantKcal={cremantKcal}
+          coffeeKcal={coffeeKcal}
           alcoholDay={alcoholLog[selectedDate] || {}}
           onAlcoholAdd={async (type) => {
             const date = selectedDate;
@@ -1185,7 +1218,7 @@ function App() {
             const newLog = { ...alcoholLog, [date]: newDay };
             await persistAlcoholLog(newLog);
             // Alkohol als kcal-Eintrag buchen
-            const kcal = type === 'beer' ? BEER_KCAL : CREMANT_KCAL;
+            const kcal = type === 'beer' ? beerKcal : cremantKcal;
             const name = type === 'beer' ? `Bier ×${prev + 1}` : `Crémant ×${prev + 1}`;
             const existing = entries.find(e => e.dateKey === date && e.isAlcohol && e.alcoholType === type);
             if (existing) {
@@ -1209,7 +1242,7 @@ function App() {
             if (prev <= 0) return;
             const newDay = { ...day, [type]: prev - 1 };
             await persistAlcoholLog({ ...alcoholLog, [date]: newDay });
-            const kcal = type === 'beer' ? BEER_KCAL : CREMANT_KCAL;
+            const kcal = type === 'beer' ? beerKcal : cremantKcal;
             const existing = entries.find(e => e.dateKey === date && e.isAlcohol && e.alcoholType === type);
             if (!existing) return;
             if (prev - 1 === 0) {
@@ -1603,8 +1636,12 @@ function App() {
           onNotesChange={persistNotes}
           waterGoal={waterGoal}
           onWaterGoalChange={persistWaterGoal}
-          showAlcohol={showAlcohol}
-          onShowAlcoholChange={persistShowAlcohol}
+          beerKcal={beerKcal}
+          onBeerKcalChange={persistBeerKcal}
+          cremantKcal={cremantKcal}
+          onCremantKcalChange={persistCremantKcal}
+          coffeeKcal={coffeeKcal}
+          onCoffeeKcalChange={persistCoffeeKcal}
           alcoholLog={alcoholLog}
           intimacyLog={intimacyLog}
           savedAnalyses={savedAnalyses}
@@ -2149,7 +2186,7 @@ function ActivityEditor({ entry, activities, currentWeight, onSave, onDelete, on
   );
 }
 
-function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, showAlcohol = false, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0, onConfirmMany, settings }) {
+function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, alcoholActiveToday = false, onAlcoholActivate, onAlcoholDeactivate, beerKcal = 145, cremantKcal = 170, coffeeKcal = 40, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0, onConfirmMany, settings }) {
   const isToday = selectedDate === todayKey();
   const netConsumed = Math.max(0, consumed - burned);
   const pct = Math.min(100, (consumed / target) * 100); // Balken = gegessen (brutto)
@@ -2651,7 +2688,7 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Kaffee</div>
               <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
-                {coffeeCount} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{COFFEE_KCAL} kcal</span>
+                {coffeeCount} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{coffeeKcal} kcal</span>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
@@ -2703,16 +2740,36 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
         </div>
       )}
 
-      {/* Alkohol-Kachel — nur wenn aktiviert */}
-      {isToday && !selectMode && showAlcohol && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+      {/* Alkohol-Aktivieren Hint — wenn nicht aktiv und nicht im Auswahlmodus */}
+      {!selectMode && !alcoholActiveToday && (
+        <div style={{ marginBottom: 4 }}>
+          <button
+            onClick={onAlcoholActivate}
+            style={{
+              width: '100%', background: 'rgba(250,246,236,0.04)',
+              border: '1px dashed rgba(250,246,236,0.2)', borderRadius: 12,
+              padding: '8px 12px', cursor: 'pointer',
+              fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}
+          >
+            <span style={{ fontSize: 13 }}>🍺</span>
+            <span>Alkohol für diesen Tag tracken</span>
+          </button>
+        </div>
+      )}
+
+      {/* Alkohol-Kachel — pro Tag */}
+      {!selectMode && alcoholActiveToday && (
+        <div style={{ marginBottom: 4 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
           {/* Bier */}
           <div style={{ flex: 1, minWidth: 0, background: 'rgba(250,246,236,0.08)', border: '1px solid rgba(250,246,236,0.15)', borderRadius: 12, padding: '10px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 20, flexShrink: 0 }}>🍺</span>
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Bier</div>
               <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
-                {alcoholDay.beer || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>× 330ml</span>
+                {alcoholDay.beer || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{beerKcal} kcal</span>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
@@ -2726,7 +2783,7 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Wein</div>
               <div style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#FAF6EC', whiteSpace: 'nowrap' }} className="num">
-                {alcoholDay.cremant || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>× 200ml</span>
+                {alcoholDay.cremant || 0} <span style={{ fontSize: 10, fontFamily: 'Inter', color: 'rgba(250,246,236,0.5)', fontWeight: 400 }}>×{cremantKcal} kcal</span>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
@@ -2734,6 +2791,20 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
               <button onClick={() => onAlcoholAdd('cremant')} style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)', color: '#FAF6EC', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
             </div>
           </div>
+          </div>
+          {/* Tracker schließen — nur wenn keine Einträge */}
+          {!alcoholDay.beer && !alcoholDay.cremant && (
+            <button
+              onClick={onAlcoholDeactivate}
+              style={{
+                width: '100%', background: 'transparent', border: 'none',
+                padding: '4px', cursor: 'pointer',
+                fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.4)',
+              }}
+            >
+              Tracker für heute schließen
+            </button>
+          )}
         </div>
       )}
 
@@ -5899,7 +5970,7 @@ function ApiStatus({ apiKey }) {
 }
 
 // === Settings ===
-function SettingsView({ settings, entries, glossary, dishes = [], weights = [], activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, showAlcohol = false, onShowAlcoholChange, alcoholLog = {}, intimacyLog = [], apiKey = '', onApiKeyChange, onSave, onBack, onImport, onLoadRecipes }) {
+function SettingsView({ settings, entries, glossary, dishes = [], weights = [], activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, beerKcal = 145, onBeerKcalChange, cremantKcal = 170, onCremantKcalChange, coffeeKcal = 40, onCoffeeKcalChange, alcoholLog = {}, intimacyLog = [], apiKey = '', onApiKeyChange, onSave, onBack, onImport, onLoadRecipes }) {
   const [s, setS] = useState(settings);
   const [keyInput, setKeyInput] = useState(apiKey);
   const [keyVisible, setKeyVisible] = useState(false);
@@ -6098,6 +6169,40 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
             <span style={{ fontFamily: 'Inter', fontSize: 14, color: 'rgba(250,246,236,0.7)' }}>Gläser à {WATER_ML}ml</span>
           </div>
         </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'rgba(250,246,236,0.6)', marginBottom: 12 }}>Kalorien pro Getränk</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 18, width: 24 }}>☕</span>
+            <span style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.8)', flex: 1 }}>Kaffee</span>
+            <input type="number" inputMode="numeric" min="0" max="500" value={coffeeKcal}
+              onChange={e => { const v = e.target.value; if (v === '') { onCoffeeKcalChange(v); return; } const n = parseInt(v); if (!isNaN(n)) onCoffeeKcalChange(Math.max(0, Math.min(500, n))); }}
+              onBlur={e => { const n = parseInt(e.target.value); if (isNaN(n) || n < 0) onCoffeeKcalChange(COFFEE_KCAL_DEFAULT); }}
+              style={{ ...styles.input, width: 70, textAlign: 'center' }} />
+            <span style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.6)', width: 30 }}>kcal</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 18, width: 24 }}>🍺</span>
+            <span style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.8)', flex: 1 }}>Bier</span>
+            <input type="number" inputMode="numeric" min="0" max="1000" value={beerKcal}
+              onChange={e => { const v = e.target.value; if (v === '') { onBeerKcalChange(v); return; } const n = parseInt(v); if (!isNaN(n)) onBeerKcalChange(Math.max(0, Math.min(1000, n))); }}
+              onBlur={e => { const n = parseInt(e.target.value); if (isNaN(n) || n < 0) onBeerKcalChange(BEER_KCAL_DEFAULT); }}
+              style={{ ...styles.input, width: 70, textAlign: 'center' }} />
+            <span style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.6)', width: 30 }}>kcal</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 18, width: 24 }}>🥂</span>
+            <span style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.8)', flex: 1 }}>Wein</span>
+            <input type="number" inputMode="numeric" min="0" max="1000" value={cremantKcal}
+              onChange={e => { const v = e.target.value; if (v === '') { onCremantKcalChange(v); return; } const n = parseInt(v); if (!isNaN(n)) onCremantKcalChange(Math.max(0, Math.min(1000, n))); }}
+              onBlur={e => { const n = parseInt(e.target.value); if (isNaN(n) || n < 0) onCremantKcalChange(CREMANT_KCAL_DEFAULT); }}
+              style={{ ...styles.input, width: 70, textAlign: 'center' }} />
+            <span style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.6)', width: 30 }}>kcal</span>
+          </div>
+          <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 8 }}>
+            Werte pro Einheit (Kaffeetasse, 0,33l Bier, 0,2l Wein). Wirkt sich auf zukünftige Einträge aus.
+          </div>
+        </div>
         <div style={{ marginBottom: 20 }}>
           <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'rgba(250,246,236,0.6)', marginBottom: 12 }}>KI-Suche</div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -6143,7 +6248,6 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
         <div style={{ marginBottom: 16 }}>
           <GlossarCompactToggle />
         </div>
-        <div style={{ marginBottom: 16 }}><AlcoholToggle value={showAlcohol} onChange={onShowAlcoholChange} /></div>
       </>}
 
       {/* === DATEN === */}
