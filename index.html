@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.24c';
+const APP_VERSION = '3.24d';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -1666,7 +1666,10 @@ function App() {
       )}
 
       {view !== 'setup' && view !== 'input' && (
-        <NavBar current={view} onNav={setView} />
+        <NavBar current={view} onNav={(v) => {
+          if (v === 'today') setSelectedDate(todayKey());
+          setView(v);
+        }} />
       )}
 
       {undoAction && (
@@ -2173,6 +2176,7 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
     try { return JSON.parse(localStorage.getItem('torcal_compact') || 'false'); } catch { return false; }
   });
   const [collapsedSlots, setCollapsedSlots] = useState(new Set()); // leere Set = alle offen
+  const [showStreakInfo, setShowStreakInfo] = useState(false);
 
   const toggleSlot = (slot) => {
     setCollapsedSlots(prev => {
@@ -2372,15 +2376,18 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
             textTransform: 'uppercase', letterSpacing: 0.8, cursor: 'pointer',
           }}>Auswertung →</button>
           {streak > 0 && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              background: streak >= 30 ? 'rgba(255,215,0,0.15)' : streak >= 7 ? 'rgba(255,140,0,0.15)' : 'rgba(250,246,236,0.08)',
-              border: `1px solid ${streak >= 30 ? 'rgba(255,215,0,0.4)' : streak >= 7 ? 'rgba(255,140,0,0.4)' : 'rgba(250,246,236,0.18)'}`,
-              borderRadius: 6, padding: '6px 10px',
-            }}>
+            <button
+              onClick={() => setShowStreakInfo(true)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                background: streak >= 30 ? 'rgba(255,215,0,0.15)' : streak >= 7 ? 'rgba(255,140,0,0.15)' : 'rgba(250,246,236,0.08)',
+                border: `1px solid ${streak >= 30 ? 'rgba(255,215,0,0.4)' : streak >= 7 ? 'rgba(255,140,0,0.4)' : 'rgba(250,246,236,0.18)'}`,
+                borderRadius: 6, padding: '6px 10px', cursor: 'pointer',
+              }}
+            >
               <span style={{ fontSize: 14 }}>{streak >= 30 ? '🏆' : streak >= 7 ? '🔥' : '⚡'}</span>
               <span style={{ fontFamily: 'Inter', fontSize: 11, fontWeight: 700, color: '#FAF6EC' }} className="num">{streak}d</span>
-            </div>
+            </button>
           )}
         </div>
       </div>
@@ -2864,6 +2871,69 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
           }}
           onCancel={() => setEditingActivity(null)}
         />
+      )}
+
+      {/* Streak Info Modal */}
+      {showStreakInfo && (
+        <div
+          onClick={() => setShowStreakInfo(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#0A2E22', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+              padding: '24px 20px 32px', width: '100%', color: '#FAF6EC',
+            }}
+          >
+            <div style={{ width: 40, height: 4, background: 'rgba(250,246,236,0.3)', borderRadius: 2, margin: '0 auto 20px' }} />
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <div style={{ fontSize: 48 }}>{streak >= 30 ? '🏆' : streak >= 7 ? '🔥' : '⚡'}</div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 36, fontWeight: 600, marginTop: 8 }} className="num">{streak}</div>
+              <div style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.7)' }}>
+                {streak === 1 ? 'Tag in Folge' : 'Tage in Folge'}
+              </div>
+            </div>
+
+            <div style={{ background: 'rgba(250,246,236,0.06)', borderRadius: 10, padding: 16, marginBottom: 12 }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 12, lineHeight: 1.6, color: 'rgba(250,246,236,0.85)' }}>
+                Der Streak zählt aufeinanderfolgende Tage, an denen du mindestens einen Eintrag (Essen oder Aktivität) gemacht hast. Heute zählt erst, wenn du etwas getrackt hast — sonst wird der Vortag bis zum Tageswechsel als aktueller Stand behalten.
+              </div>
+            </div>
+
+            <div style={{ background: 'rgba(250,246,236,0.06)', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.6)', marginBottom: 8 }}>Meilensteine</div>
+              <div style={{ fontFamily: 'Inter', fontSize: 12, lineHeight: 1.9, color: 'rgba(250,246,236,0.85)' }}>
+                ⚡ Ab Tag 1 — Start<br/>
+                🔥 Ab Tag 7 — eine Woche durchgezogen<br/>
+                🏆 Ab Tag 30 — ein Monat in Folge<br/>
+              </div>
+              {streak < 7 && (
+                <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.6)', marginTop: 8 }}>
+                  Noch {7 - streak} {7 - streak === 1 ? 'Tag' : 'Tage'} bis 🔥
+                </div>
+              )}
+              {streak >= 7 && streak < 30 && (
+                <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.6)', marginTop: 8 }}>
+                  Noch {30 - streak} {30 - streak === 1 ? 'Tag' : 'Tage'} bis 🏆
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowStreakInfo(false)}
+              style={{
+                width: '100%', padding: '12px',
+                background: 'rgba(250,246,236,0.1)',
+                border: '1px solid rgba(250,246,236,0.2)',
+                borderRadius: 8, color: '#FAF6EC',
+                fontFamily: 'Inter', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Schließen
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -6031,8 +6101,19 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
         <div style={{ marginBottom: 20 }}>
           <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'rgba(250,246,236,0.6)', marginBottom: 12 }}>KI-Suche</div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input type={keyVisible ? 'text' : 'password'} placeholder="sk-ant-..." value={keyInput}
+            <input
+              type={keyVisible ? 'text' : 'password'}
+              placeholder="sk-ant-..."
+              value={keyInput}
               onChange={e => setKeyInput(e.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+              name="ant-api-key-no-autofill"
               style={{ ...styles.input, flex: 1, fontFamily: 'monospace', fontSize: 12 }} />
             <button style={styles.iconBtn} onClick={() => setKeyVisible(!keyVisible)}>{keyVisible ? '🙈' : '👁'}</button>
           </div>
