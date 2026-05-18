@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.24b';
+const APP_VERSION = '3.24c';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -233,6 +233,18 @@ const RECIPE_EXTRA_GLOSSARY = [
   { id: 'gr22', name: 'Skyr',                kcalPer100g: 63,  protein: 11,   carbs: 4,    fat: 0.2,  units: { 'g': 1 } },
   { id: 'gr23', name: 'Himbeeren (TK)',      kcalPer100g: 35,  protein: 1.3,  carbs: 4.6,  fat: 0.3,  units: { 'g': 1 } },
   { id: 'gr24', name: 'Cashewkerne',         kcalPer100g: 553, protein: 18,   carbs: 30,   fat: 44,   units: { 'g': 1 } },
+  // Alkohol (kcal pro 100ml)
+  { id: 'gr30', name: 'Pils (5%)',           kcalPer100g: 42,  protein: 0.5,  carbs: 3.5,  fat: 0,    units: { 'ml': 1, 'g': 1, '0,33l': 330, '0,5l': 500 }, isAlcohol: true },
+  { id: 'gr31', name: 'Weizenbier (5,3%)',   kcalPer100g: 45,  protein: 0.6,  carbs: 4.0,  fat: 0,    units: { 'ml': 1, 'g': 1, '0,5l': 500 }, isAlcohol: true },
+  { id: 'gr32', name: 'IPA/Craft (7%)',      kcalPer100g: 60,  protein: 0.7,  carbs: 5.0,  fat: 0,    units: { 'ml': 1, 'g': 1, '0,33l': 330 }, isAlcohol: true },
+  { id: 'gr33', name: 'Bier alkoholfrei',    kcalPer100g: 22,  protein: 0.4,  carbs: 5.0,  fat: 0,    units: { 'ml': 1, 'g': 1, '0,33l': 330, '0,5l': 500 } },
+  { id: 'gr34', name: 'Weißwein trocken',    kcalPer100g: 75,  protein: 0.1,  carbs: 0.6,  fat: 0,    units: { 'ml': 1, 'g': 1, 'Glas': 200 }, isAlcohol: true },
+  { id: 'gr35', name: 'Rotwein trocken',     kcalPer100g: 80,  protein: 0.1,  carbs: 0.5,  fat: 0,    units: { 'ml': 1, 'g': 1, 'Glas': 200 }, isAlcohol: true },
+  { id: 'gr36', name: 'Sekt/Crémant',        kcalPer100g: 80,  protein: 0.1,  carbs: 1.5,  fat: 0,    units: { 'ml': 1, 'g': 1, 'Glas': 100 }, isAlcohol: true },
+  { id: 'gr37', name: 'Aperol Spritz',       kcalPer100g: 55,  protein: 0,    carbs: 7.0,  fat: 0,    units: { 'ml': 1, 'g': 1, 'Glas': 200 }, isAlcohol: true },
+  { id: 'gr38', name: 'Gin Tonic',           kcalPer100g: 65,  protein: 0,    carbs: 7.0,  fat: 0,    units: { 'ml': 1, 'g': 1, 'Glas': 250 }, isAlcohol: true },
+  { id: 'gr39', name: 'Schnaps/Spirituose',  kcalPer100g: 220, protein: 0,    carbs: 0,    fat: 0,    units: { 'ml': 1, 'g': 1, '2cl': 20, '4cl': 40 }, isAlcohol: true },
+  { id: 'gr40', name: 'Cocktail (mittel)',   kcalPer100g: 90,  protein: 0,    carbs: 12,   fat: 0,    units: { 'ml': 1, 'g': 1, 'Glas': 300 }, isAlcohol: true },
 ];
 
 // Rezepte. itemsByName referenziert per Name auf das Glossar (Default + Extra).
@@ -5037,6 +5049,20 @@ Aufgabe: ${aufgabe}`;
   const maxKcal = Math.max(target * 1.2, ...dayData.map(d => d.kcal));
   const avgKcal = Math.round(dayData.filter(d => d.kcal > 0).reduce((s, d) => s + d.kcal, 0) / Math.max(1, dayData.filter(d => d.kcal > 0).length));
 
+  // === Alkohol-Auswertung für Range ===
+  const rangeKeys = new Set(dayData.map(d => d.key));
+  const alcoholInRange = entries.filter(e => rangeKeys.has(e.dateKey) && (
+    e.isAlcohol === true ||
+    (() => {
+      const g = glossary.find(g => g.id === e.foodId);
+      return g && g.isAlcohol === true;
+    })()
+  ));
+  const alcoholKcal = alcoholInRange.reduce((s, e) => s + (e.kcal || 0), 0);
+  const alcoholCount = alcoholInRange.reduce((s, e) => s + (e.qty || 1), 0);
+  const alcoholDays = new Set(alcoholInRange.map(e => e.dateKey)).size;
+  const alcoholAvgPerDay = Math.round(alcoholKcal / days);
+
   // Gewicht-Daten
   const sortedWeights = [...weights].sort((a, b) => a.date.localeCompare(b.date));
   const latestWeight = sortedWeights[sortedWeights.length - 1];
@@ -5461,6 +5487,28 @@ Aufgabe: ${aufgabe}`;
         <div style={{ fontFamily: 'Fraunces', fontSize: 36, fontWeight: 600, color: '#0D3B2E' }} className="num">{avgKcal || 0} <span style={{ fontSize: 14, color: '#5C6B5E' }}>kcal</span></div>
         <div style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', marginTop: 4 }}>Ziel: <span className="num">{target}</span></div>
       </div>
+
+      {/* Alkohol-Karte */}
+      {alcoholCount > 0 && (
+        <div style={{ background: '#FAF6EC', borderRadius: 12, padding: 20, marginTop: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#5C6B5E' }}>🍺 Alkohol {range === 'week' ? '(7 Tage)' : '(30 Tage)'}</div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 28, fontWeight: 600, color: '#0D3B2E', marginTop: 4 }} className="num">{alcoholKcal} <span style={{ fontSize: 14, color: '#5C6B5E' }}>kcal</span></div>
+              <div style={{ fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', marginTop: 4 }}>
+                {alcoholCount} {alcoholCount === 1 ? 'Drink' : 'Drinks'} an {alcoholDays} {alcoholDays === 1 ? 'Tag' : 'Tagen'} · Ø {alcoholAvgPerDay} kcal/Tag
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 10, color: '#5C6B5E', textTransform: 'uppercase', letterSpacing: 1 }}>Anteil</div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 600, color: '#0D3B2E' }} className="num">
+                {avgKcal > 0 ? Math.round((alcoholKcal / (avgKcal * days)) * 100) : 0}%
+              </div>
+              <div style={{ fontFamily: 'Inter', fontSize: 10, color: '#5C6B5E' }}>der kcal</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ marginTop: 24, padding: '0 4px' }}>
         {dayData.map(d => (
