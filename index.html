@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.24a';
+const APP_VERSION = '3.24b';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -5071,8 +5071,10 @@ Aufgabe: ${aufgabe}`;
         const lostSoFar = start - current;
         const progressPct = totalLoss !== 0 ? Math.max(0, Math.min(100, (lostSoFar / totalLoss) * 100)) : 0;
 
-        // Soll heute (linear)
-        const startDateRef = sortedWeights[0]?.date ? new Date(sortedWeights[0].date) : today;
+        // Soll heute (linear) - basiert auf Startdatum aus Settings (nicht erster Wiege-Eintrag!)
+        const startDateRef = settings.startDate
+          ? new Date(settings.startDate)
+          : new Date(today);
         startDateRef.setHours(0, 0, 0, 0);
         const totalDays = Math.max(1, Math.round((targetD - startDateRef) / (1000 * 60 * 60 * 24)));
         const daysPassed = Math.max(0, Math.round((today - startDateRef) / (1000 * 60 * 60 * 24)));
@@ -5210,7 +5212,7 @@ Aufgabe: ${aufgabe}`;
               goal={settings?.targetWeight && settings?.targetDate ? {
                 startKg: +settings.startWeight || sortedWeights[0]?.kg,
                 targetKg: +settings.targetWeight,
-                startDate: sortedWeights[0]?.date,
+                startDate: settings.startDate || new Date().toISOString().slice(0, 10),
                 targetDate: settings.targetDate,
               } : null}
             />
@@ -5900,6 +5902,18 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
             onChange={e => setS({ ...s, targetWeight: e.target.value === '' ? '' : +e.target.value })}
             style={styles.input}
           />
+        </Field>
+
+        <Field label="Startdatum">
+          <input
+            type="date"
+            value={s.startDate || ''}
+            onChange={e => setS({ ...s, startDate: e.target.value })}
+            style={styles.input}
+          />
+          <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 4 }}>
+            Datum, ab dem das Ziel verfolgt wird. Bestimmt die Soll-Linie.
+          </div>
         </Field>
 
         <Field label="Zieldatum">
