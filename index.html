@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.25';
+const APP_VERSION = '3.26';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -736,6 +736,7 @@ function App() {
   const [showIntimacy, setShowIntimacy] = useState(false); // versteckt aktivierbar
   const [apiKey, setApiKey] = useState('');
   const [loaded, setLoaded] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(null); // null | { version }
   const [selectedDate, setSelectedDate] = useState(todayKey());
   const [pendingDishItems, setPendingDishItems] = useState(null);
   const [pendingWorkoutItems, setPendingWorkoutItems] = useState(null);
@@ -743,6 +744,7 @@ function App() {
   // === Timer-State (App-weit, damit er Tab-Wechsel überlebt) ===
   const [timerTotalSeconds, setTimerTotalSeconds] = useState(600);
   const [timerMarkerInterval, setTimerMarkerInterval] = useState(60);
+  const [timerTransitionSeconds, setTimerTransitionSeconds] = useState(0); // 0 = aus, 5 oder 10
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerPaused, setTimerPaused] = useState(false);
   const [timerElapsed, setTimerElapsed] = useState(0);
@@ -798,11 +800,15 @@ function App() {
   // rAF-Loop läuft App-weit, unabhängig vom aktiven Tab
   useEffect(() => {
     if (!timerRunning || timerFinished || timerPaused) return;
+    // Effektive Gesamtdauer inkl. Übergänge
+    const intervals = timerMarkerInterval > 0 ? Math.floor(timerTotalSeconds / timerMarkerInterval) : 0;
+    const transitions = Math.max(0, intervals - 1);
+    const totalDuration = timerTotalSeconds + transitions * timerTransitionSeconds;
     const tick = () => {
       const now = performance.now();
       const e = (now - timerStartRef.current) / 1000;
-      if (e >= timerTotalSeconds) {
-        setTimerElapsed(timerTotalSeconds);
+      if (e >= totalDuration) {
+        setTimerElapsed(totalDuration);
         setTimerFinished(true);
         return;
       }
@@ -811,7 +817,7 @@ function App() {
     };
     timerRafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(timerRafRef.current);
-  }, [timerRunning, timerFinished, timerPaused, timerTotalSeconds]);
+  }, [timerRunning, timerFinished, timerPaused, timerTotalSeconds, timerMarkerInterval, timerTransitionSeconds]);
 
   // Wake Lock App-weit
   useEffect(() => {
@@ -956,6 +962,52 @@ function App() {
     })();
   }, []);
 
+  // === Auto-Update-Check ===
+  // Beim Start (und alle 10 Min): prüfe, ob online eine neuere Version liegt.
+  useEffect(() => {
+    const checkForUpdate = async () => {
+      try {
+        const res = await fetch(window.location.pathname + '?v=' + Date.now(), {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        });
+        if (!res.ok) return;
+        const text = await res.text();
+        // Aus dem geladenen Text die Version extrahieren
+        const match = text.match(/APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
+        if (!match) return;
+        const onlineVersion = match[1];
+        if (onlineVersion && onlineVersion !== APP_VERSION) {
+          setUpdateAvailable({ version: onlineVersion });
+        }
+      } catch (e) {
+        // Offline oder Fehler — egal, nichts tun
+      }
+    };
+    // Sofort prüfen, dann alle 10 Min
+    checkForUpdate();
+    const interval = setInterval(checkForUpdate, 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const reloadApp = async () => {
+    // Service Worker (falls vorhanden) deregistrieren und Cache leeren
+    if ('serviceWorker' in navigator) {
+      try {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const reg of regs) await reg.unregister();
+      } catch {}
+    }
+    if ('caches' in window) {
+      try {
+        const names = await caches.keys();
+        await Promise.all(names.map(n => caches.delete(n)));
+      } catch {}
+    }
+    // Hard reload mit Cache-Busting
+    window.location.href = window.location.pathname + '?v=' + Date.now();
+  };
+
   const persistEntries = async (next) => { setEntries(next); await saveKey('entries', next); };
   const persistGlossary = async (next) => { setGlossary(next); await saveKey('glossary', next); };
   const persistDishes = async (next) => { setDishes(next); await saveKey('dishes', next); };
@@ -1060,6 +1112,22 @@ function App() {
 
   return (
     <div style={styles.app} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      {updateAvailable && (
+        <div
+          onClick={reloadApp}
+          style={{
+            position: 'sticky', top: 0, left: 0, right: 0, zIndex: 1000,
+            background: '#1A5340', borderBottom: '1px solid #90C8A8',
+            padding: '10px 16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            cursor: 'pointer',
+            fontFamily: 'Inter', fontSize: 13, color: '#FAF6EC',
+          }}
+        >
+          <span style={{ fontSize: 16 }}>🔄</span>
+          <span>Neue Version {updateAvailable.version} verfügbar — tippen zum Aktualisieren</span>
+        </div>
+      )}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
         * { box-sizing: border-box; }
@@ -1612,6 +1680,8 @@ function App() {
           setTotalSeconds={setTimerTotalSeconds}
           markerInterval={timerMarkerInterval}
           setMarkerInterval={setTimerMarkerInterval}
+          transitionSeconds={timerTransitionSeconds}
+          setTransitionSeconds={setTimerTransitionSeconds}
           running={timerRunning}
           paused={timerPaused}
           elapsed={timerElapsed}
@@ -6455,6 +6525,7 @@ function Movement({
   onBack,
   // Timer-Props
   totalSeconds, setTotalSeconds, markerInterval, setMarkerInterval,
+  transitionSeconds, setTransitionSeconds,
   running, paused, elapsed, finished,
   onStart, onStop, onTogglePause,
 }) {
@@ -6557,6 +6628,8 @@ function Movement({
             setTotalSeconds={setTotalSeconds}
             markerInterval={markerInterval}
             setMarkerInterval={setMarkerInterval}
+            transitionSeconds={transitionSeconds}
+            setTransitionSeconds={setTransitionSeconds}
             running={running}
             paused={paused}
             elapsed={elapsed}
@@ -6613,6 +6686,7 @@ function Timer({
   onBack, embedded = false,
   totalSeconds, setTotalSeconds,
   markerInterval, setMarkerInterval,
+  transitionSeconds = 0, setTransitionSeconds = () => {},
   running, paused, elapsed, finished,
   onStart, onStop, onTogglePause,
 }) {
@@ -6695,7 +6769,7 @@ function Timer({
         </div>
 
         <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.65)', marginBottom: 8 }}>Marker-Intervall</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 16 }}>
           {[
             { label: 'Keine', val: 0 },
             { label: 'Alle 30s', val: 30 },
@@ -6717,6 +6791,46 @@ function Timer({
             </button>
           ))}
         </div>
+
+        {markerInterval > 0 && (
+          <>
+            <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.65)', marginBottom: 8 }}>Übergang (Wechselzeit)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 8 }}>
+              {[
+                { label: 'Aus', val: 0 },
+                { label: '5s', val: 5 },
+                { label: '10s', val: 10 },
+              ].map(o => (
+                <button
+                  key={o.val}
+                  onClick={() => setTransitionSeconds(o.val)}
+                  style={{
+                    padding: '14px 8px',
+                    background: transitionSeconds === o.val ? '#FAF6EC' : 'rgba(250,246,236,0.08)',
+                    color: transitionSeconds === o.val ? '#0D3B2E' : '#FAF6EC',
+                    border: `1px solid ${transitionSeconds === o.val ? '#FAF6EC' : 'rgba(250,246,236,0.2)'}`,
+                    borderRadius: 8,
+                    fontFamily: 'Inter', fontSize: 14, fontWeight: 500,
+                  }}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {transitionSeconds > 0 && (() => {
+              const intervals = Math.floor(totalSeconds / markerInterval);
+              const transitions = Math.max(0, intervals - 1);
+              const totalWithTransition = totalSeconds + transitions * transitionSeconds;
+              return (
+                <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.55)', marginBottom: 24, textAlign: 'center' }}>
+                  Gesamt-Workout: {Math.floor(totalWithTransition / 60)}:{String(totalWithTransition % 60).padStart(2, '0')} min
+                  &nbsp;·&nbsp;{intervals}× Übung à {markerInterval}s + {transitions}× Übergang à {transitionSeconds}s
+                </div>
+              );
+            })()}
+            {transitionSeconds === 0 && <div style={{ marginBottom: 16 }} />}
+          </>
+        )}
 
         <button style={styles.primary} onClick={onStart} disabled={totalSeconds <= 0}>
           Start
@@ -6746,16 +6860,54 @@ function Timer({
   }
 
   // === Run-Phase ===
-  const remainingTotal = Math.max(0, totalSeconds - elapsed);
   const hasMarkers = markerInterval > 0;
-  const completedMarkers = hasMarkers ? Math.floor(elapsed / markerInterval) : 0;
-  const totalMarkers = hasMarkers ? Math.floor(totalSeconds / markerInterval) : 0;
-  const timeIntoMarker = hasMarkers ? elapsed - completedMarkers * markerInterval : 0;
-  const remainingToMarker = hasMarkers ? Math.max(0, markerInterval - timeIntoMarker) : remainingTotal;
-  const displaySeconds = hasMarkers ? Math.ceil(remainingToMarker) : Math.ceil(remainingTotal);
-  const displayProgress = hasMarkers ? (timeIntoMarker / markerInterval) : (elapsed / totalSeconds);
+  const hasTransition = hasMarkers && transitionSeconds > 0;
+  const totalIntervals = hasMarkers ? Math.floor(totalSeconds / markerInterval) : 0;
+  const totalTransitions = Math.max(0, totalIntervals - 1);
+  const totalDuration = totalSeconds + totalTransitions * transitionSeconds;
+  const remainingTotal = Math.max(0, totalDuration - elapsed);
 
-  const inFinalCountdown = displaySeconds <= 5;
+  // Bestimme aktuelle Phase (Übung oder Übergang)
+  let inTransition = false;
+  let timeIntoPhase = 0;
+  let phaseDuration = markerInterval;
+  let completedMarkers = 0;
+
+  if (hasMarkers) {
+    // Zykluslänge = markerInterval + transitionSeconds
+    const cycleLen = markerInterval + transitionSeconds;
+    if (hasTransition) {
+      const completeCycles = Math.floor(elapsed / cycleLen);
+      const intoCycle = elapsed - completeCycles * cycleLen;
+      if (intoCycle < markerInterval) {
+        // Übungsphase
+        inTransition = false;
+        timeIntoPhase = intoCycle;
+        phaseDuration = markerInterval;
+        completedMarkers = completeCycles;
+      } else {
+        // Übergangsphase
+        inTransition = true;
+        timeIntoPhase = intoCycle - markerInterval;
+        phaseDuration = transitionSeconds;
+        completedMarkers = completeCycles + 1;
+      }
+    } else {
+      completedMarkers = Math.floor(elapsed / markerInterval);
+      timeIntoPhase = elapsed - completedMarkers * markerInterval;
+      phaseDuration = markerInterval;
+    }
+  } else {
+    timeIntoPhase = elapsed;
+    phaseDuration = totalSeconds;
+  }
+
+  const remainingInPhase = Math.max(0, phaseDuration - timeIntoPhase);
+  const displaySeconds = hasMarkers ? Math.ceil(remainingInPhase) : Math.ceil(remainingTotal);
+  const displayProgress = hasMarkers ? (timeIntoPhase / phaseDuration) : (elapsed / totalDuration);
+  const totalMarkers = totalIntervals;
+
+  const inFinalCountdown = displaySeconds <= 5 && !inTransition;
 
   const radius = 130;
   const circumference = 2 * Math.PI * radius;
@@ -6767,8 +6919,8 @@ function Timer({
       : { ...styles.page, display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         <button style={styles.iconBtn} onClick={onStop} aria-label="Beenden"><X size={20} /></button>
-        <h1 style={{ ...styles.h1, margin: 0, fontSize: 18, color: 'rgba(250,246,236,0.7)', flex: 1 }}>
-          {paused ? 'Pausiert' : 'Timer läuft'}
+        <h1 style={{ ...styles.h1, margin: 0, fontSize: 18, color: inTransition ? '#E8A87C' : 'rgba(250,246,236,0.7)', flex: 1, transition: 'color 200ms ease' }}>
+          {paused ? 'Pausiert' : inTransition ? '🔄 Wechsel' : 'Timer läuft'}
         </h1>
       </div>
 
@@ -6791,8 +6943,8 @@ function Timer({
         ) : <div style={{ width: 64 }} />}
 
         <div style={{ flex: 1, textAlign: 'center' }}>
-          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.5, color: 'rgba(250,246,236,0.5)' }}>
-            {hasMarkers ? 'Bis zum Marker' : 'Verbleibend'}
+          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.5, color: inTransition ? '#E8A87C' : 'rgba(250,246,236,0.5)', transition: 'color 200ms ease' }}>
+            {hasMarkers ? (inTransition ? 'Position wechseln' : 'Bis zum Marker') : 'Verbleibend'}
           </div>
         </div>
 
@@ -6828,7 +6980,7 @@ function Timer({
             cy={radius + 15}
             r={radius}
             fill="none"
-            stroke={inFinalCountdown ? '#E8A89F' : '#FAF6EC'}
+            stroke={inTransition ? '#E8A87C' : (inFinalCountdown ? '#E8A89F' : '#FAF6EC')}
             strokeWidth={inFinalCountdown ? 8 : 6}
             strokeDasharray={circumference}
             strokeDashoffset={strokeOffset}
