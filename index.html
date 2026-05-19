@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.26';
+const APP_VERSION = '3.27';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -737,6 +737,8 @@ function App() {
   const [apiKey, setApiKey] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(null); // null | { version }
+  const [unlockedAchievements, setUnlockedAchievements] = useState([]); // persistierte IDs
+  const [newAchievement, setNewAchievement] = useState(null); // {id, emoji, name, desc} fürs Popup
   const [selectedDate, setSelectedDate] = useState(todayKey());
   const [pendingDishItems, setPendingDishItems] = useState(null);
   const [pendingWorkoutItems, setPendingWorkoutItems] = useState(null);
@@ -919,6 +921,7 @@ function App() {
       const ckc = await loadKey('cremantKcal', CREMANT_KCAL_DEFAULT);
       const cofkc = await loadKey('coffeeKcal', COFFEE_KCAL_DEFAULT);
       const intim = await loadKey('intimacyLog', []);
+      const unlockedAchs = await loadKey('unlockedAchievements', []);
       const showAlc = await loadKey('showAlcohol', false);
       const showInt = await loadKey('showIntimacy', false);
       setSettings(s);
@@ -941,6 +944,7 @@ function App() {
       setCremantKcal(ckc);
       setCoffeeKcal(cofkc);
       setIntimacyLog(intim);
+      setUnlockedAchievements(unlockedAchs);
       setShowAlcohol(showAlc);
       setShowIntimacy(showInt);
       // Einmalige Bereinigung: Einträge mit ungültigem Slot reparieren
@@ -1061,6 +1065,157 @@ function App() {
     return count;
   })();
 
+  // === Achievements ===
+  const allAchievements = (() => {
+    const list = [];
+
+    // Streak-Stufen
+    [
+      { id: 'streak_1',   threshold: 1,   emoji: '🌱', name: 'Start',          desc: 'Erster Tracking-Tag' },
+      { id: 'streak_3',   threshold: 3,   emoji: '⚡', name: 'Dranbleiben',    desc: '3 Tage in Folge' },
+      { id: 'streak_7',   threshold: 7,   emoji: '🔥', name: 'Eine Woche',     desc: '7 Tage in Folge' },
+      { id: 'streak_14',  threshold: 14,  emoji: '💪', name: 'Zwei Wochen',    desc: '14 Tage in Folge' },
+      { id: 'streak_30',  threshold: 30,  emoji: '🏆', name: 'Ein Monat',      desc: '30 Tage in Folge' },
+      { id: 'streak_60',  threshold: 60,  emoji: '💎', name: 'Zwei Monate',   desc: '60 Tage in Folge' },
+      { id: 'streak_100', threshold: 100, emoji: '👑', name: 'Hundert',        desc: '100 Tage in Folge' },
+      { id: 'streak_180', threshold: 180, emoji: '🚀', name: 'Halbes Jahr',    desc: '180 Tage in Folge' },
+      { id: 'streak_365', threshold: 365, emoji: '🌟', name: 'Ein Jahr',       desc: '365 Tage in Folge' },
+    ].forEach(s => {
+      list.push({ ...s, group: 'streak', unlocked: streak >= s.threshold, progress: Math.min(streak, s.threshold), max: s.threshold });
+    });
+
+    // Ganzer Kalendermonat lückenlos
+    const monthsTracked = (() => {
+      const allDates = new Set([...entries.map(e => e.dateKey), ...activityEntries.map(a => a.dateKey)]);
+      // Gruppiere nach YYYY-MM, prüfe ob alle Tage des Monats drin sind
+      const months = {};
+      allDates.forEach(d => {
+        const ym = d.slice(0, 7);
+        months[ym] = months[ym] || new Set();
+        months[ym].add(d.slice(8, 10));
+      });
+      let complete = 0;
+      Object.entries(months).forEach(([ym, days]) => {
+        const [y, m] = ym.split('-').map(Number);
+        const lastDay = new Date(y, m, 0).getDate();
+        // Nur abgeschlossene Monate zählen (nicht aktueller Monat, falls noch nicht vorbei)
+        const todayD = new Date();
+        const isCurrentMonth = todayD.getFullYear() === y && (todayD.getMonth() + 1) === m;
+        if (!isCurrentMonth && days.size >= lastDay) complete++;
+      });
+      return complete;
+    })();
+    list.push({ id: 'month_full_1', group: 'monthly', emoji: '📅', name: 'Ganzer Monat', desc: 'Einen Kalendermonat lückenlos getrackt', unlocked: monthsTracked >= 1, progress: monthsTracked >= 1 ? 1 : 0, max: 1 });
+    list.push({ id: 'month_full_3', group: 'monthly', emoji: '🗓️', name: 'Drei Monate', desc: 'Drei Kalendermonate lückenlos', unlocked: monthsTracked >= 3, progress: Math.min(monthsTracked, 3), max: 3 });
+
+    // Gewichts-Meilensteine
+    const startWeight = +settings?.startWeight || (weights.length > 0 ? [...weights].sort((a,b) => a.date.localeCompare(b.date))[0].kg : null);
+    const latestWeight = weights.length > 0 ? [...weights].sort((a,b) => b.date.localeCompare(a.date))[0].kg : null;
+    const lostKg = (startWeight && latestWeight) ? Math.max(0, startWeight - latestWeight) : 0;
+    [
+      { id: 'lost_2',  threshold: 2,  emoji: '📉', name: 'Erste 2 kg',  desc: '2 kg abgenommen' },
+      { id: 'lost_5',  threshold: 5,  emoji: '📊', name: '5 kg weg',     desc: '5 kg abgenommen' },
+      { id: 'lost_10', threshold: 10, emoji: '🏔️', name: '10 kg weg',   desc: '10 kg abgenommen' },
+      { id: 'lost_15', threshold: 15, emoji: '💯', name: '15 kg weg',   desc: '15 kg abgenommen' },
+      { id: 'lost_20', threshold: 20, emoji: '🎖️', name: '20 kg weg',   desc: '20 kg abgenommen' },
+    ].forEach(s => {
+      list.push({ ...s, group: 'weight', unlocked: lostKg >= s.threshold, progress: Math.min(lostKg, s.threshold), max: s.threshold });
+    });
+
+    // Zielgewicht erreicht
+    if (settings?.targetWeight && latestWeight) {
+      list.push({
+        id: 'target_reached', group: 'weight', emoji: '🎯', name: 'Ziel erreicht',
+        desc: settings.goalLabel ? `Zielgewicht für ${settings.goalLabel} geknackt` : 'Zielgewicht erreicht',
+        unlocked: latestWeight <= +settings.targetWeight,
+        progress: latestWeight <= +settings.targetWeight ? 1 : 0,
+        max: 1,
+      });
+    }
+
+    // Mahlzeiten getrackt (Anzahl entries die nicht Wasser/Kaffee/Alkohol sind, lasen wir einfach: alle entries)
+    const mealsCount = entries.length;
+    [
+      { id: 'meals_100',  threshold: 100,  emoji: '🍳', name: '100 Einträge',  desc: '100 Mahlzeiten/Einträge getrackt' },
+      { id: 'meals_500',  threshold: 500,  emoji: '🍽️', name: '500 Einträge',  desc: '500 Mahlzeiten/Einträge' },
+      { id: 'meals_1000', threshold: 1000, emoji: '🏅', name: '1000 Einträge', desc: '1000 Mahlzeiten/Einträge' },
+    ].forEach(s => {
+      list.push({ ...s, group: 'meals', unlocked: mealsCount >= s.threshold, progress: Math.min(mealsCount, s.threshold), max: s.threshold });
+    });
+
+    // Aktivitäts-Distanz (falls activityEntries Distanzen haben, ansonsten min-Aggregat)
+    // Wir benutzen Dauer als Proxy für Aktivität, weil nicht alle Einträge Distanz haben.
+    const totalActivityMin = activityEntries.reduce((s, a) => s + (a.durationMin || 0), 0);
+    [
+      { id: 'act_300',   threshold: 300,   emoji: '🚴', name: '5h Aktivität',    desc: 'Insgesamt 5 Stunden Bewegung' },
+      { id: 'act_1200',  threshold: 1200,  emoji: '🏃', name: '20h Aktivität',   desc: 'Insgesamt 20 Stunden Bewegung' },
+      { id: 'act_3000',  threshold: 3000,  emoji: '🏔️', name: '50h Aktivität',  desc: 'Insgesamt 50 Stunden Bewegung' },
+    ].forEach(s => {
+      list.push({ ...s, group: 'activity', unlocked: totalActivityMin >= s.threshold, progress: Math.min(totalActivityMin, s.threshold), max: s.threshold });
+    });
+
+    // Wasser-Champion: 7 Tage in Folge Wasserziel erreicht (waterLog speichert pro Tag)
+    // Wir nehmen einen anderen Proxy: Anzahl Tage mit ≥ waterGoal Wassereinträgen aus entries
+    // Vereinfachung: nicht implementiert, würde echte Wasser-Historie brauchen
+    // Daher Achievement weglassen oder vereinfachen → Anzahl getrackter Tage gesamt
+    const totalDaysTracked = new Set([...entries.map(e => e.dateKey), ...activityEntries.map(a => a.dateKey)]).size;
+    [
+      { id: 'days_30',  threshold: 30,  emoji: '📆', name: '30 Tage Tracking',  desc: '30 verschiedene Tage getrackt' },
+      { id: 'days_90',  threshold: 90,  emoji: '📈', name: '90 Tage Tracking',  desc: '90 verschiedene Tage getrackt' },
+      { id: 'days_180', threshold: 180, emoji: '🏗️', name: '180 Tage',          desc: '180 verschiedene Tage getrackt' },
+    ].forEach(s => {
+      list.push({ ...s, group: 'days', unlocked: totalDaysTracked >= s.threshold, progress: Math.min(totalDaysTracked, s.threshold), max: s.threshold });
+    });
+
+    // Trocken-Woche: 7 Tage in Folge ohne Alkohol — vereinfacht: Anzahl Tage mit Alkohol-Einträgen
+    const dryStreak = (() => {
+      let count = 0;
+      let d = new Date();
+      for (let i = 0; i < 365; i++) {
+        const key = todayKey(d);
+        // Hat dieser Tag Einträge UND keine Alkohol-Einträge (im alcoholLog)?
+        const hasTracking = entries.some(e => e.dateKey === key) || activityEntries.some(a => a.dateKey === key);
+        const hasAlcohol = alcoholLog[key] && ((alcoholLog[key].beer || 0) > 0 || (alcoholLog[key].cremant || 0) > 0);
+        if (!hasTracking) break;
+        if (hasAlcohol) break;
+        count++;
+        d.setDate(d.getDate() - 1);
+      }
+      return count;
+    })();
+    list.push({ id: 'dry_7',  group: 'health', emoji: '💧', name: 'Trocken-Woche', desc: '7 Tage in Folge ohne Alkohol', unlocked: dryStreak >= 7, progress: Math.min(dryStreak, 7), max: 7 });
+    list.push({ id: 'dry_30', group: 'health', emoji: '🌿', name: 'Trocken-Monat', desc: '30 Tage in Folge ohne Alkohol', unlocked: dryStreak >= 30, progress: Math.min(dryStreak, 30), max: 30 });
+
+    return list;
+  })();
+
+  const unlockedCount = allAchievements.filter(a => a.unlocked).length;
+
+  // === Achievement-Detection: neue Unlocks → Popup + persistieren ===
+  useEffect(() => {
+    if (!loaded) return;
+    const currentlyUnlocked = allAchievements.filter(a => a.unlocked).map(a => a.id);
+    const previouslyUnlocked = new Set(unlockedAchievements);
+    const newlyUnlocked = currentlyUnlocked.filter(id => !previouslyUnlocked.has(id));
+
+    if (newlyUnlocked.length > 0) {
+      // Speichere alle aktuell freigeschalteten persistent
+      const next = Array.from(new Set([...unlockedAchievements, ...currentlyUnlocked]));
+      setUnlockedAchievements(next);
+      saveKey('unlockedAchievements', next);
+
+      // Zeige Popup für das erste neue Achievement (falls mehrere, kommen nacheinander)
+      const firstNew = allAchievements.find(a => a.id === newlyUnlocked[0]);
+      if (firstNew) {
+        // Nur Popup, wenn schon Initial-Load durch ist (sonst beim ersten Start spammig)
+        // Initial-Load: unlockedAchievements ist [] und currentlyUnlocked füllt sich erstmalig
+        if (unlockedAchievements.length > 0 || currentlyUnlocked.length === 1) {
+          setNewAchievement(firstNew);
+        }
+      }
+    }
+  }, [loaded, allAchievements.map(a => a.unlocked).join(',')]);
+
   const currentWeight = (() => {
     if (weights.length === 0) return settings?.weight || 75;
     const sorted = [...weights].sort((a, b) => b.date.localeCompare(a.date));
@@ -1126,6 +1281,55 @@ function App() {
         >
           <span style={{ fontSize: 16 }}>🔄</span>
           <span>Neue Version {updateAvailable.version} verfügbar — tippen zum Aktualisieren</span>
+        </div>
+      )}
+
+      {/* Achievement-Popup */}
+      {newAchievement && (
+        <div
+          onClick={() => setNewAchievement(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 2000, padding: 20,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'linear-gradient(135deg, #1A5340 0%, #0A2E22 100%)',
+              borderRadius: 20, padding: '32px 24px',
+              maxWidth: 360, width: '100%', textAlign: 'center',
+              color: '#FAF6EC',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.6), 0 0 80px rgba(255,215,0,0.15)',
+              border: '1px solid rgba(255,215,0,0.3)',
+            }}
+          >
+            <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 2, color: 'rgba(255,215,0,0.85)', marginBottom: 12 }}>
+              🎉 Neues Abzeichen 🎉
+            </div>
+            <div style={{ fontSize: 80, lineHeight: 1, marginBottom: 12 }}>
+              {newAchievement.emoji}
+            </div>
+            <div style={{ fontFamily: 'Fraunces', fontSize: 24, fontWeight: 600, marginBottom: 6 }}>
+              {newAchievement.name}
+            </div>
+            <div style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.75)', marginBottom: 24, lineHeight: 1.4 }}>
+              {newAchievement.desc}
+            </div>
+            <button
+              onClick={() => setNewAchievement(null)}
+              style={{
+                width: '100%', padding: '14px',
+                background: '#FAF6EC', color: '#0D3B2E',
+                border: 'none', borderRadius: 10,
+                fontFamily: 'Inter', fontSize: 14, fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Stark!
+            </button>
+          </div>
         </div>
       )}
       <style>{`
@@ -1323,6 +1527,8 @@ function App() {
             }
           }}
           streak={streak}
+          achievements={allAchievements}
+          unlockedCount={unlockedCount}
           onExportDay={(deep = false) => {
             const date = selectedDate;
             const allDayEntries = entries.filter(e => e.dateKey === date); // alle inkl. Kaffee
@@ -2256,7 +2462,7 @@ function ActivityEditor({ entry, activities, currentWeight, onSave, onDelete, on
   );
 }
 
-function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, alcoholActiveToday = false, onAlcoholActivate, onAlcoholDeactivate, beerKcal = 145, cremantKcal = 170, coffeeKcal = 40, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0, onConfirmMany, settings }) {
+function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, alcoholActiveToday = false, onAlcoholActivate, onAlcoholDeactivate, beerKcal = 145, cremantKcal = 170, coffeeKcal = 40, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0, achievements = [], unlockedCount = 0, onConfirmMany, settings }) {
   const isToday = selectedDate === todayKey();
   const netConsumed = Math.max(0, consumed - burned);
   const pct = Math.min(100, (consumed / target) * 100); // Balken = gegessen (brutto)
@@ -2487,12 +2693,14 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
               onClick={() => setShowStreakInfo(true)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 4,
-                background: streak >= 30 ? 'rgba(255,215,0,0.15)' : streak >= 7 ? 'rgba(255,140,0,0.15)' : 'rgba(250,246,236,0.08)',
-                border: `1px solid ${streak >= 30 ? 'rgba(255,215,0,0.4)' : streak >= 7 ? 'rgba(255,140,0,0.4)' : 'rgba(250,246,236,0.18)'}`,
+                background: streak >= 100 ? 'rgba(255,215,0,0.20)' : streak >= 30 ? 'rgba(255,215,0,0.15)' : streak >= 7 ? 'rgba(255,140,0,0.15)' : 'rgba(250,246,236,0.08)',
+                border: `1px solid ${streak >= 100 ? 'rgba(255,215,0,0.5)' : streak >= 30 ? 'rgba(255,215,0,0.4)' : streak >= 7 ? 'rgba(255,140,0,0.4)' : 'rgba(250,246,236,0.18)'}`,
                 borderRadius: 6, padding: '6px 10px', cursor: 'pointer',
               }}
             >
-              <span style={{ fontSize: 14 }}>{streak >= 30 ? '🏆' : streak >= 7 ? '🔥' : '⚡'}</span>
+              <span style={{ fontSize: 14 }}>
+                {streak >= 365 ? '🌟' : streak >= 180 ? '🚀' : streak >= 100 ? '👑' : streak >= 60 ? '💎' : streak >= 30 ? '🏆' : streak >= 14 ? '💪' : streak >= 7 ? '🔥' : streak >= 3 ? '⚡' : '🌱'}
+              </span>
               <span style={{ fontFamily: 'Inter', fontSize: 11, fontWeight: 700, color: '#FAF6EC' }} className="num">{streak}d</span>
             </button>
           )}
@@ -3025,40 +3233,96 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
             style={{
               background: '#0A2E22', borderTopLeftRadius: 20, borderTopRightRadius: 20,
               padding: '24px 20px 32px', width: '100%', color: '#FAF6EC',
+              maxHeight: '85vh', overflowY: 'auto',
             }}
           >
             <div style={{ width: 40, height: 4, background: 'rgba(250,246,236,0.3)', borderRadius: 2, margin: '0 auto 20px' }} />
+
+            {/* Streak-Header */}
             <div style={{ textAlign: 'center', marginBottom: 20 }}>
-              <div style={{ fontSize: 48 }}>{streak >= 30 ? '🏆' : streak >= 7 ? '🔥' : '⚡'}</div>
-              <div style={{ fontFamily: 'Fraunces', fontSize: 36, fontWeight: 600, marginTop: 8 }} className="num">{streak}</div>
+              <div style={{ fontSize: 56 }}>
+                {streak >= 365 ? '🌟' : streak >= 180 ? '🚀' : streak >= 100 ? '👑' : streak >= 60 ? '💎' : streak >= 30 ? '🏆' : streak >= 14 ? '💪' : streak >= 7 ? '🔥' : streak >= 3 ? '⚡' : '🌱'}
+              </div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 40, fontWeight: 600, marginTop: 4 }} className="num">{streak}</div>
               <div style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.7)' }}>
                 {streak === 1 ? 'Tag in Folge' : 'Tage in Folge'}
               </div>
+
+              {/* Nächste Streak-Stufe */}
+              {(() => {
+                const nextStreak = achievements.find(a => a.group === 'streak' && !a.unlocked);
+                if (!nextStreak) return null;
+                const remaining = nextStreak.threshold - streak;
+                return (
+                  <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 8 }}>
+                    Noch {remaining} {remaining === 1 ? 'Tag' : 'Tage'} bis {nextStreak.emoji} {nextStreak.name}
+                  </div>
+                );
+              })()}
             </div>
 
-            <div style={{ background: 'rgba(250,246,236,0.06)', borderRadius: 10, padding: 16, marginBottom: 12 }}>
-              <div style={{ fontFamily: 'Inter', fontSize: 12, lineHeight: 1.6, color: 'rgba(250,246,236,0.85)' }}>
-                Der Streak zählt aufeinanderfolgende Tage, an denen du mindestens einen Eintrag (Essen oder Aktivität) gemacht hast. Heute zählt erst, wenn du etwas getrackt hast — sonst wird der Vortag bis zum Tageswechsel als aktueller Stand behalten.
+            {/* Sammlung Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 16, fontWeight: 600 }}>
+                Sammlung
+              </div>
+              <div style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.6)' }} className="num">
+                {unlockedCount} / {achievements.length}
               </div>
             </div>
 
-            <div style={{ background: 'rgba(250,246,236,0.06)', borderRadius: 10, padding: 16, marginBottom: 16 }}>
-              <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.6)', marginBottom: 8 }}>Meilensteine</div>
-              <div style={{ fontFamily: 'Inter', fontSize: 12, lineHeight: 1.9, color: 'rgba(250,246,236,0.85)' }}>
-                ⚡ Ab Tag 1 — Start<br/>
-                🔥 Ab Tag 7 — eine Woche durchgezogen<br/>
-                🏆 Ab Tag 30 — ein Monat in Folge<br/>
+            {/* Gruppen */}
+            {[
+              { key: 'streak', label: '🔥 Streak-Stufen' },
+              { key: 'monthly', label: '📅 Komplette Monate' },
+              { key: 'weight', label: '⚖️ Gewicht' },
+              { key: 'meals', label: '🍽️ Tracking-Einträge' },
+              { key: 'days', label: '📆 Tracking-Tage' },
+              { key: 'activity', label: '🚴 Aktivität' },
+              { key: 'health', label: '💧 Gesundheit' },
+            ].map(group => {
+              const groupAchs = achievements.filter(a => a.group === group.key);
+              if (groupAchs.length === 0) return null;
+              const groupUnlocked = groupAchs.filter(a => a.unlocked).length;
+              return (
+                <div key={group.key} style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.55)' }}>{group.label}</div>
+                    <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.4)' }} className="num">{groupUnlocked}/{groupAchs.length}</div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))', gap: 8 }}>
+                    {groupAchs.map(a => (
+                      <div
+                        key={a.id}
+                        title={`${a.name}: ${a.desc}`}
+                        style={{
+                          background: a.unlocked ? 'rgba(144,200,168,0.12)' : 'rgba(250,246,236,0.04)',
+                          border: `1px solid ${a.unlocked ? 'rgba(144,200,168,0.35)' : 'rgba(250,246,236,0.1)'}`,
+                          borderRadius: 10, padding: '8px 4px',
+                          display: 'flex', flexDirection: 'column', alignItems: 'center',
+                          textAlign: 'center', gap: 2,
+                          opacity: a.unlocked ? 1 : 0.55,
+                        }}
+                      >
+                        <div style={{ fontSize: 22, filter: a.unlocked ? 'none' : 'grayscale(1)' }}>{a.emoji}</div>
+                        <div style={{ fontFamily: 'Inter', fontSize: 9, fontWeight: 600, color: '#FAF6EC', lineHeight: 1.2 }}>{a.name}</div>
+                        {!a.unlocked && a.max > 1 && (
+                          <div style={{ fontFamily: 'Inter', fontSize: 8, color: 'rgba(250,246,236,0.5)' }} className="num">
+                            {Math.floor(a.progress)}/{a.max}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Info am Ende */}
+            <div style={{ background: 'rgba(250,246,236,0.04)', borderRadius: 10, padding: 12, marginTop: 8, marginBottom: 16 }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.6)', lineHeight: 1.5 }}>
+                Streaks zählen Tage mit mindestens einem Eintrag. Heute zählt erst, wenn du etwas getrackt hast.
               </div>
-              {streak < 7 && (
-                <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.6)', marginTop: 8 }}>
-                  Noch {7 - streak} {7 - streak === 1 ? 'Tag' : 'Tage'} bis 🔥
-                </div>
-              )}
-              {streak >= 7 && streak < 30 && (
-                <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.6)', marginTop: 8 }}>
-                  Noch {30 - streak} {30 - streak === 1 ? 'Tag' : 'Tage'} bis 🏆
-                </div>
-              )}
             </div>
 
             <button
