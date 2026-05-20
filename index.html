@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.27';
+const APP_VERSION = '3.28';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -203,6 +203,93 @@ const DEFAULT_ACTIVITIES = [
   { id: 'a19', name: 'Treppensteigen', met: 8.8 },
   { id: 'a20', name: 'Hausarbeit', met: 3.3 },
   { id: 'a21', name: 'Gartenarbeit', met: 4.0 },
+];
+
+// === MET-Datenbank zum Durchsuchen (Compendium of Physical Activities) ===
+// Werte zum Hinzufügen ins Aktivitäten-Glossar.
+const MET_DATABASE = [
+  // Gehen / Laufen
+  { name: 'Spazieren (langsam)', met: 2.0 },
+  { name: 'Spazieren (gemütlich)', met: 2.8 },
+  { name: 'Walken (zügig)', met: 4.3 },
+  { name: 'Nordic Walking', met: 4.8 },
+  { name: 'Wandern', met: 5.3 },
+  { name: 'Bergwandern', met: 6.5 },
+  { name: 'Joggen (leicht)', met: 7.0 },
+  { name: 'Laufen (zügig)', met: 9.8 },
+  { name: 'Laufen (schnell)', met: 11.5 },
+  { name: 'Trailrunning', met: 9.0 },
+  { name: 'Treppensteigen', met: 8.8 },
+  // Rad
+  { name: 'Radfahren (gemütlich)', met: 4.0 },
+  { name: 'Radfahren (zügig)', met: 8.0 },
+  { name: 'Radfahren (sportlich)', met: 10.0 },
+  { name: 'Rennrad', met: 12.0 },
+  { name: 'Mountainbike', met: 8.5 },
+  { name: 'Spinning / Indoor Cycling', met: 8.5 },
+  // Wasser
+  { name: 'Schwimmen (locker)', met: 6.0 },
+  { name: 'Schwimmen (zügig)', met: 8.3 },
+  { name: 'Schwimmen (intensiv)', met: 10.0 },
+  { name: 'Aquafitness', met: 5.5 },
+  { name: 'Stand-Up-Paddling', met: 6.0 },
+  { name: 'Kajak / Kanu', met: 5.0 },
+  { name: 'Rudern (Ergometer)', met: 7.0 },
+  // Kraft / Fitness
+  { name: 'Krafttraining', met: 5.0 },
+  { name: 'Krafttraining (intensiv)', met: 6.0 },
+  { name: 'Zirkeltraining', met: 8.0 },
+  { name: 'HIIT', met: 8.0 },
+  { name: 'Crossfit', met: 9.0 },
+  { name: 'Calisthenics', met: 6.0 },
+  { name: 'Bauch-Beine-Po', met: 4.5 },
+  { name: 'Stretching', met: 2.3 },
+  { name: 'Yoga', met: 2.5 },
+  { name: 'Yoga (Power/Vinyasa)', met: 4.0 },
+  { name: 'Pilates', met: 3.0 },
+  // Ballsport
+  { name: 'Badminton', met: 5.5 },
+  { name: 'Badminton (Wettkampf)', met: 7.0 },
+  { name: 'Tennis', met: 7.3 },
+  { name: 'Tischtennis', met: 4.0 },
+  { name: 'Squash', met: 12.0 },
+  { name: 'Fußball', met: 7.0 },
+  { name: 'Basketball', met: 6.5 },
+  { name: 'Volleyball', met: 4.0 },
+  { name: 'Handball', met: 8.0 },
+  { name: 'Golf', met: 4.8 },
+  // Kampfsport / Tanz
+  { name: 'Boxen', met: 9.0 },
+  { name: 'Kickboxen', met: 10.0 },
+  { name: 'Kampfsport allgemein', met: 10.0 },
+  { name: 'Judo / Ringen', met: 10.0 },
+  { name: 'Tanzen (gesellig)', met: 4.5 },
+  { name: 'Tanzen (sportlich)', met: 7.0 },
+  { name: 'Zumba', met: 6.5 },
+  { name: 'Ballett', met: 4.8 },
+  // Winter
+  { name: 'Skifahren', met: 7.0 },
+  { name: 'Snowboarden', met: 5.3 },
+  { name: 'Langlauf', met: 9.0 },
+  { name: 'Schlittschuhlaufen', met: 7.0 },
+  { name: 'Eishockey', met: 8.0 },
+  // Outdoor / Sonstige
+  { name: 'Klettern / Bouldern', met: 8.0 },
+  { name: 'Reiten', met: 5.5 },
+  { name: 'Inline-Skaten', met: 7.5 },
+  { name: 'Trampolin', met: 4.5 },
+  { name: 'Seilspringen', met: 11.0 },
+  { name: 'Frisbee', met: 3.0 },
+  // Alltag
+  { name: 'Hausarbeit', met: 3.3 },
+  { name: 'Putzen (intensiv)', met: 3.5 },
+  { name: 'Gartenarbeit', met: 4.0 },
+  { name: 'Rasenmähen', met: 5.0 },
+  { name: 'Holz hacken', met: 6.0 },
+  { name: 'Umzug / Möbel tragen', met: 7.0 },
+  { name: 'Kinderturnen', met: 4.0 },
+  { name: 'Mit Kindern spielen (aktiv)', met: 5.0 },
+  { name: 'Einkaufen', met: 2.3 },
 ];
 
 // === Rezeptvorschläge (Hochzeits-Diät, ~600 kcal Abend) ===
@@ -1232,7 +1319,7 @@ function App() {
   const remaining = dailyTarget + burned - consumed;
 
   // Tab-Reihenfolge für Wischgesten (entspricht NavBar)
-  const NAV_TABS = ['today', 'movement', 'dishes', 'glossary', 'settings'];
+  const NAV_TABS = ['movement', 'dishes', 'today', 'glossary', 'settings'];
 
   // Wischgesten zwischen Tabs
 
@@ -5105,6 +5192,60 @@ function Glossary({ glossary, activities, onChange, onChangeActivities, onBack, 
               </div>
             </div>
           ))}
+
+          {/* Vorschläge aus der MET-Datenbank */}
+          {(() => {
+            const existingNames = new Set(activities.map(a => a.name.toLowerCase()));
+            const suggestions = MET_DATABASE.filter(m => {
+              if (existingNames.has(m.name.toLowerCase())) return false;
+              if (!search.trim()) return false; // nur bei aktiver Suche zeigen
+              return m.name.toLowerCase().includes(search.toLowerCase());
+            });
+            if (suggestions.length === 0) return null;
+            return (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.5)', marginBottom: 8 }}>
+                  Vorschläge zum Hinzufügen
+                </div>
+                {suggestions.map(m => (
+                  <div
+                    key={m.name}
+                    onClick={() => {
+                      const newAct = { id: 'a' + crypto.randomUUID().slice(0, 8), name: m.name, met: m.met };
+                      onChangeActivities([...activities, newAct]);
+                      setSearch('');
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '10px 12px', marginBottom: 4,
+                      background: 'rgba(250,246,236,0.06)',
+                      border: '1px dashed rgba(250,246,236,0.2)',
+                      borderRadius: 8, cursor: 'pointer',
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: 'Fraunces', fontSize: 15, fontWeight: 500, color: '#FAF6EC' }}>{m.name}</div>
+                      <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)' }} className="num">MET {m.met}</div>
+                    </div>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      width: 28, height: 28, borderRadius: 6,
+                      background: 'rgba(144,200,168,0.2)', border: '1px solid rgba(144,200,168,0.4)',
+                    }}>
+                      <Plus size={16} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {!search.trim() && (
+            <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.4)', textAlign: 'center', marginTop: 12, marginBottom: 12 }}>
+              Tipp: Tippe oben in die Suche, um aus über 70 Sportarten auszuwählen
+            </div>
+          )}
+
           <button style={styles.primary} onClick={() => setEditingActivity({ id: null, name: '', met: 5 })}>
             <Plus size={18} style={{ marginRight: 8 }} /> Neue Aktivität
           </button>
