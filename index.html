@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.33';
+const APP_VERSION = '3.34';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -7742,7 +7742,7 @@ function Field({ label, children }) {
 const styles = {
   app: {
     height: '100vh',
-    overflowY: 'auto',
+    overflow: 'hidden',
     background: '#0D3B2E',
     color: '#0A2E22',
     display: 'flex', flexDirection: 'column',
@@ -7750,7 +7750,13 @@ const styles = {
     maxWidth: 480, margin: '0 auto',
     backgroundImage: 'radial-gradient(circle at top, #1A5340 0%, #0D3B2E 60%, #0A2E22 100%)',
   },
-  page: { padding: '20px 20px 96px', flex: 1, overflowY: 'auto' },
+  page: {
+    padding: '20px 20px 96px', flex: 1,
+    overflowY: 'auto',
+    WebkitOverflowScrolling: 'touch',
+    overscrollBehavior: 'contain',
+    minHeight: 0,
+  },
   h1: { fontFamily: 'Fraunces, serif', fontSize: 32, fontWeight: 600, margin: '8px 0 4px', letterSpacing: -0.5, color: '#FAF6EC' },
   sub: { fontFamily: 'Inter', fontSize: 14, color: 'rgba(250,246,236,0.7)', marginTop: 0 },
   input: {
