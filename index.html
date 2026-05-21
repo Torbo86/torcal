@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.29';
+const APP_VERSION = '3.30';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -6596,6 +6596,34 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
     reader.readAsText(file);
   };
 
+  // Nur das Glossar exportieren (für Analyse/Korrektur)
+  const exportGlossary = () => {
+    const blob = new Blob([JSON.stringify({ glossary, exportedAt: new Date().toISOString(), type: 'torcal-glossary' }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `torcal-glossar-${todayKey()}.json`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Nur das Glossar importieren (ersetzt nur das Glossar, Rest bleibt)
+  const importGlossary = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        // Akzeptiere sowohl { glossary: [...] } als auch direkt ein Array
+        const gloss = Array.isArray(data) ? data : data.glossary;
+        if (!Array.isArray(gloss)) { alert('Keine Glossar-Daten in der Datei gefunden.'); return; }
+        if (confirm(`Glossar mit ${gloss.length} Einträgen importieren? Das aktuelle Glossar wird ersetzt, deine Tracking-Daten bleiben unangetastet.`)) {
+          onImport({ glossary: gloss });
+        }
+      } catch { alert('Ungültige Datei'); }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div style={styles.page}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -6865,7 +6893,20 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
             }}
           >🍽️ Rezeptvorschläge laden</button>
         )}
-        <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 12, textAlign: 'center', lineHeight: 1.8 }}>
+
+        <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.45)', marginTop: 20, marginBottom: 8 }}>
+          Nur Glossar
+        </div>
+        <button style={styles.secondary} onClick={exportGlossary}>📤 Glossar exportieren</button>
+        <label style={{ ...styles.secondary, display: 'block', textAlign: 'center', marginTop: 8, cursor: 'pointer' }}>
+          📥 Glossar importieren
+          <input type="file" accept=".json" onChange={importGlossary} style={{ display: 'none' }} />
+        </label>
+        <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 8, lineHeight: 1.5 }}>
+          Exportiert nur das Lebensmittel-Glossar als separate Datei. Praktisch, um es prüfen und korrigiert wieder einzuspielen, ohne die Tracking-Daten anzufassen.
+        </div>
+
+        <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 16, textAlign: 'center', lineHeight: 1.8 }}>
           {entries.length} Einträge · {glossary.length} Glossar · {dishes.length} Gerichte<br/>
           {weights.length} Wiegen{savedAnalyses.length > 0 ? ` · ${savedAnalyses.length} Analysen` : ''}
         </div>
