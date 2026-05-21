@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.30';
+const APP_VERSION = '3.31';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -7630,45 +7630,86 @@ function NavBar({ current, onNav }) {
   return (
     <div style={{
       position: 'sticky', bottom: 0, left: 0, right: 0,
-      background: 'rgba(10,46,34,0.95)', backdropFilter: 'blur(12px)',
-      borderTop: '1px solid rgba(250,246,236,0.12)',
+      background: 'linear-gradient(to top, rgba(8,38,28,0.99) 0%, rgba(10,46,34,0.95) 100%)',
+      backdropFilter: 'blur(16px)',
+      borderTop: '1px solid rgba(250,246,236,0.08)',
+      boxShadow: '0 -4px 24px rgba(0,0,0,0.25)',
       display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end',
-      padding: '8px 0 14px',
+      padding: '10px 4px 16px',
       marginTop: 'auto',
     }}>
-      {items.map(({ v, icon: Icon, l, center }) => (
-        center ? (
-          // Heute — zentriert, leicht abgehoben
+      {items.map(({ v, icon: Icon, l, center }) => {
+        const active = current === v;
+        if (center) {
+          // Heute — zentriert, abgehoben
+          return (
+            <button key={v} onClick={() => onNav(v)} style={{
+              background: 'none', border: 'none', display: 'flex', flexDirection: 'column',
+              alignItems: 'center', gap: 5, padding: '0 12px',
+              color: active ? '#FAF6EC' : 'rgba(250,246,236,0.65)',
+              transform: 'translateY(-10px)',
+              position: 'relative', cursor: 'pointer',
+            }}>
+              <div style={{
+                width: 54, height: 54, borderRadius: '50%',
+                background: active
+                  ? 'radial-gradient(circle at 35% 30%, #2D6A52 0%, #1A5340 70%)'
+                  : 'rgba(250,246,236,0.08)',
+                border: `2px solid ${active ? '#90C8A8' : 'rgba(250,246,236,0.18)'}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: active
+                  ? '0 6px 20px rgba(0,0,0,0.4), 0 0 24px rgba(144,200,168,0.25)'
+                  : '0 2px 8px rgba(0,0,0,0.2)',
+                transition: 'all 250ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+              }}>
+                <Icon size={active ? 25 : 23} />
+              </div>
+              <span style={{
+                fontFamily: 'Inter', fontSize: 10,
+                fontWeight: active ? 700 : 500,
+                letterSpacing: active ? 0.3 : 0,
+                transition: 'all 200ms ease',
+              }}>{l}</span>
+            </button>
+          );
+        }
+        return (
           <button key={v} onClick={() => onNav(v)} style={{
             background: 'none', border: 'none', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', gap: 4, padding: '0 16px',
-            color: current === v ? '#FAF6EC' : 'rgba(250,246,236,0.6)',
-            transform: 'translateY(-6px)',
-            position: 'relative',
+            alignItems: 'center', gap: 5, padding: '4px 14px',
+            color: active ? '#FAF6EC' : 'rgba(250,246,236,0.45)',
+            cursor: 'pointer', position: 'relative',
+            transition: 'color 200ms ease',
           }}>
             <div style={{
-              width: 48, height: 48, borderRadius: '50%',
-              background: current === v ? '#1A5340' : 'rgba(250,246,236,0.1)',
-              border: `2px solid ${current === v ? '#90C8A8' : 'rgba(250,246,236,0.2)'}`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: current === v ? '0 4px 16px rgba(0,0,0,0.3)' : 'none',
-              transition: 'all 200ms ease',
+              width: 40, height: 30, borderRadius: 9,
+              background: active ? 'rgba(144,200,168,0.14)' : 'transparent',
+              transition: 'background 200ms ease',
             }}>
-              <Icon size={22} />
+              <div style={{
+                transform: active ? 'scale(1.08)' : 'scale(1)',
+                transition: 'transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+                display: 'flex',
+              }}>
+                <Icon size={20} />
+              </div>
             </div>
-            <span style={{ fontFamily: 'Inter', fontSize: 10, fontWeight: current === v ? 700 : 500 }}>{l}</span>
+            <span style={{
+              fontFamily: 'Inter', fontSize: 10,
+              fontWeight: active ? 700 : 500,
+              transition: 'font-weight 200ms ease',
+            }}>{l}</span>
+            {/* Aktiv-Punkt */}
+            <div style={{
+              position: 'absolute', bottom: -4,
+              width: 4, height: 4, borderRadius: '50%',
+              background: active ? '#90C8A8' : 'transparent',
+              transition: 'background 200ms ease',
+            }} />
           </button>
-        ) : (
-          <button key={v} onClick={() => onNav(v)} style={{
-            background: 'none', border: 'none', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', gap: 4, padding: '4px 16px',
-            color: current === v ? '#FAF6EC' : 'rgba(250,246,236,0.5)',
-          }}>
-            <Icon size={20} />
-            <span style={{ fontFamily: 'Inter', fontSize: 10, fontWeight: 500 }}>{l}</span>
-          </button>
-        )
-      ))}
+        );
+      })}
     </div>
   );
 }
