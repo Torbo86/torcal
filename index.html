@@ -131,8 +131,33 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.44';
+const APP_VERSION = '3.45';
 const APP_NAME = 'Torcal';
+
+// === Versionshistorie (neueste zuerst) ===
+const CHANGELOG = [
+  { v: '3.45', changes: ['Versionshistorie unter Daten einsehbar'] },
+  { v: '3.44', changes: ['Ansicht "Alle" zeigt den ganzen Weg bis zum Zieldatum'] },
+  { v: '3.43', changes: ['Zielgewicht ohne Datum: Prognose-Modus mit waagerechter Ziel-Linie', 'Prognose aus Tempo der letzten 30 Tage'] },
+  { v: '3.42', changes: ['Chart-Zoom gefixt: Soll-Linie wird aufs sichtbare Fenster geclippt'] },
+  { v: '3.41', changes: ['7-Tage-Knopf im Gewichts-Chart', 'Ziel-Rechnung jetzt ab heute mit aktuellem Gewicht'] },
+  { v: '3.40', changes: ['Zielgewicht-Tracking abschaltbar', 'Abschluss-Karte wenn Zieldatum erreicht'] },
+  { v: '3.39', changes: ['Einstellungs-Kacheln passen jetzt sauber ins Bild'] },
+  { v: '3.38', changes: ['Einstellungen als Kachel-Menü statt Scroll-Leiste'] },
+  { v: '3.37', changes: ['Versionsnummer im Header sichtbar'] },
+  { v: '3.36', changes: ['Streak-Freeze-System: rettet vergessene Tage automatisch'] },
+  { v: '3.35', changes: ['Streak-Sprung-Bug behoben'] },
+  { v: '3.34', changes: ['Scroll-Bug behoben: nur noch ein Scroll-Container'] },
+  { v: '3.33', changes: ['Listen scrollbar statt abgeschnitten (Trainings & Lebensmittel)'] },
+  { v: '3.32', changes: ['NavBar-Layout gefixt, Safe-Area für Gestenleiste'] },
+  { v: '3.31', changes: ['NavBar grafisch überarbeitet'] },
+  { v: '3.30', changes: ['Glossar einzeln exportier- und importierbar'] },
+  { v: '3.29', changes: ['Streak-Abzeichen-Sammlung mit Meilensteinen'] },
+  { v: '3.28', changes: ['Sportarten-Suche mit über 70 MET-Werten'] },
+  { v: '3.26', changes: ['Auto-Update-Hinweis', 'Timer mit Übergangs-Intervall'] },
+  { v: '3.25', changes: ['Kalorien pro Getränk einstellbar', 'Alkohol-Tracker pro Tag'] },
+  { v: '3.24', changes: ['Ziel-Reiter, Hochzeits-Widget, Soll-Linie im Chart', 'Rezeptvorschläge & Alkohol-Glossar'] },
+];
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
 const WATER_GOAL = 8;   // Gläser pro Tag
@@ -6746,6 +6771,7 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
   const [keyInput, setKeyInput] = useState(apiKey);
   const [keyVisible, setKeyVisible] = useState(false);
   const [tab, setTab] = useState(null); // null = Kachel-Menü | profil | ziel | tracker | darstellung | daten
+  const [showChangelog, setShowChangelog] = useState(false);
   const target = calcDailyKcal(s);
 
   const exportData = () => {
@@ -7152,6 +7178,44 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
           {entries.length} Einträge · {glossary.length} Glossar · {dishes.length} Gerichte<br/>
           {weights.length} Wiegen{savedAnalyses.length > 0 ? ` · ${savedAnalyses.length} Analysen` : ''}
         </div>
+
+        {/* Versionshistorie — ausklappbar */}
+        <div style={{ marginTop: 24 }}>
+          <button
+            onClick={() => setShowChangelog(!showChangelog)}
+            style={{
+              width: '100%', background: 'rgba(250,246,236,0.05)',
+              border: '1px solid rgba(250,246,236,0.12)', borderRadius: 10,
+              padding: '12px 14px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: 'rgba(250,246,236,0.8)',
+            }}
+          >
+            <span>📋 Versionshistorie</span>
+            <span style={{ fontSize: 11, color: 'rgba(250,246,236,0.5)' }}>{showChangelog ? '▲' : '▼'}</span>
+          </button>
+          {showChangelog && (
+            <div style={{
+              marginTop: 8, background: 'rgba(250,246,236,0.04)',
+              borderRadius: 10, padding: '12px 14px',
+              maxHeight: 320, overflowY: 'auto',
+            }}>
+              {CHANGELOG.map(entry => (
+                <div key={entry.v} style={{ marginBottom: 12 }}>
+                  <div style={{ fontFamily: 'Fraunces', fontSize: 13, fontWeight: 600, color: '#90C8A8' }}>
+                    v{entry.v}
+                  </div>
+                  {entry.changes.map((c, i) => (
+                    <div key={i} style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.7)', lineHeight: 1.5, marginTop: 2 }}>
+                      · {c}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div style={{ marginTop: 32, textAlign: 'center' }}>
           <div style={{ fontFamily: 'Fraunces', fontSize: 14, fontWeight: 600, color: 'rgba(250,246,236,0.5)' }}>{APP_NAME} v{APP_VERSION}</div>
           <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.35)', marginTop: 4 }}>© by torben</div>
