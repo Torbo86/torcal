@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.36';
+const APP_VERSION = '3.37';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -1506,7 +1506,7 @@ function App() {
       {view !== 'setup' && view !== 'input' && (
         <div style={{
           padding: '12px 20px 8px',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1,
           borderBottom: '1px solid rgba(250,246,236,0.08)',
         }}>
           <span
@@ -1521,6 +1521,12 @@ function App() {
             onTouchCancel={() => clearTimeout(window._torcalLongPress)}
           >
             Torcal
+          </span>
+          <span style={{
+            fontFamily: 'Inter', fontSize: 9, fontWeight: 500,
+            color: 'rgba(250,246,236,0.35)', letterSpacing: 0.5, userSelect: 'none',
+          }}>
+            v{APP_VERSION}
           </span>
         </div>
       )}
