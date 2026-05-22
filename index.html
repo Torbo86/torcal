@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.41';
+const APP_VERSION = '3.42';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -6324,35 +6324,56 @@ function WeightChart({ weights, goal = null }) {
   // Soll-Linie? (goal = { startKg, targetKg, startDate, targetDate })
   const showGoal = goal && goal.targetKg && goal.targetDate && goal.startKg && goal.startDate;
 
+  // X-Achse richtet sich NUR nach dem sichtbaren Gewichts-Zeitfenster,
+  // nicht nach dem Zieldatum. Die Soll-Linie wird darauf geclippt.
+  const dates = weights.map(w => new Date(w.date).getTime());
+  const minD = dates[0];
+  const maxD = dates[dates.length - 1];
+  const rangeD = Math.max(1, maxD - minD);
+
+  const xFor = (ms) => pad.l + ((ms - minD) / rangeD) * innerW;
+
+  // Soll-Linie als lineare Funktion: kg an einem beliebigen Zeitpunkt
+  let goalKgAt = null;
+  let goalSeg = null; // sichtbares Segment der Soll-Linie {x1,kg1,x2,kg2}
+  if (showGoal) {
+    const gStartMs = new Date(goal.startDate).getTime();
+    const gEndMs = new Date(goal.targetDate).getTime();
+    const gSpan = Math.max(1, gEndMs - gStartMs);
+    goalKgAt = (ms) => goal.startKg + (goal.targetKg - goal.startKg) * ((ms - gStartMs) / gSpan);
+    // Sichtbares Segment: Schnittmenge von [minD,maxD] mit [gStartMs,gEndMs]
+    const segStart = Math.max(minD, gStartMs);
+    const segEnd = Math.min(maxD, gEndMs);
+    if (segStart < segEnd) {
+      goalSeg = {
+        x1: segStart, kg1: goalKgAt(segStart),
+        x2: segEnd, kg2: goalKgAt(segEnd),
+      };
+    }
+  }
+
+  // Y-Achse: aus sichtbaren Gewichten + sichtbarem Soll-Segment
   const kgs = weights.map(w => w.kg);
   let minKg = Math.min(...kgs);
   let maxKg = Math.max(...kgs);
-  if (showGoal) {
-    minKg = Math.min(minKg, goal.targetKg, goal.startKg);
-    maxKg = Math.max(maxKg, goal.targetKg, goal.startKg);
+  if (goalSeg) {
+    minKg = Math.min(minKg, goalSeg.kg1, goalSeg.kg2);
+    maxKg = Math.max(maxKg, goalSeg.kg1, goalSeg.kg2);
   }
   const rangeKg = Math.max(0.5, maxKg - minKg);
   const padKg = rangeKg * 0.15;
   const yMin = minKg - padKg;
   const yMax = maxKg + padKg;
 
-  const dates = weights.map(w => new Date(w.date).getTime());
-  let minD = dates[0];
-  let maxD = dates[dates.length - 1];
-  if (showGoal) {
-    const gStart = new Date(goal.startDate).getTime();
-    const gEnd = new Date(goal.targetDate).getTime();
-    minD = Math.min(minD, gStart);
-    maxD = Math.max(maxD, gEnd);
-  }
-  const rangeD = Math.max(1, maxD - minD);
-
-  const xFor = (date) => pad.l + ((new Date(date).getTime() - minD) / rangeD) * innerW;
   const yFor = (kg) => pad.t + (1 - (kg - yMin) / (yMax - yMin)) * innerH;
 
-  const path = weights.map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(p.date)},${yFor(p.kg)}`).join(' ');
+  const path = weights.map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(new Date(p.date).getTime())},${yFor(p.kg)}`).join(' ');
 
   const yLabels = [yMin, (yMin + yMax) / 2, yMax];
+
+  // Ziel-Punkt nur zeigen, wenn das Zieldatum im sichtbaren Fenster liegt
+  const targetMs = showGoal ? new Date(goal.targetDate).getTime() : 0;
+  const targetVisible = showGoal && targetMs >= minD && targetMs <= maxD;
 
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block' }}>
@@ -6372,11 +6393,11 @@ function WeightChart({ weights, goal = null }) {
           </text>
         </g>
       ))}
-      {/* Soll-Linie */}
-      {showGoal && (
+      {/* Soll-Linie — nur sichtbares Segment */}
+      {goalSeg && (
         <line
-          x1={xFor(goal.startDate)} y1={yFor(goal.startKg)}
-          x2={xFor(goal.targetDate)} y2={yFor(goal.targetKg)}
+          x1={xFor(goalSeg.x1)} y1={yFor(goalSeg.kg1)}
+          x2={xFor(goalSeg.x2)} y2={yFor(goalSeg.kg2)}
           stroke="#A03A35" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.7}
         />
       )}
@@ -6384,22 +6405,20 @@ function WeightChart({ weights, goal = null }) {
       {weights.map((p, i) => (
         <circle
           key={i}
-          cx={xFor(p.date)} cy={yFor(p.kg)} r={3}
+          cx={xFor(new Date(p.date).getTime())} cy={yFor(p.kg)} r={3}
           fill="#0D3B2E"
         />
       ))}
-      {/* Ziel-Punkt */}
-      {showGoal && (
-        <circle cx={xFor(goal.targetDate)} cy={yFor(goal.targetKg)} r={4} fill="#A03A35" stroke="#FAF6EC" strokeWidth={1.5} />
+      {/* Ziel-Punkt nur wenn im sichtbaren Fenster */}
+      {targetVisible && (
+        <circle cx={xFor(targetMs)} cy={yFor(goal.targetKg)} r={4} fill="#A03A35" stroke="#FAF6EC" strokeWidth={1.5} />
       )}
-      {/* X-Achse: erstes und letztes Datum */}
+      {/* X-Achse: erstes und letztes sichtbares Datum */}
       <text x={pad.l} y={h - 4} fontSize={9} fontFamily="Inter" fill="#5C6B5E">
         {new Date(weights[0].date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}
       </text>
       <text x={w - pad.r} y={h - 4} fontSize={9} fontFamily="Inter" fill="#5C6B5E" textAnchor="end">
-        {showGoal
-          ? new Date(goal.targetDate).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
-          : new Date(weights[weights.length - 1].date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}
+        {new Date(weights[weights.length - 1].date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}
       </text>
     </svg>
   );
