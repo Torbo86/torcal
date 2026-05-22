@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.39';
+const APP_VERSION = '3.41';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -2074,6 +2074,7 @@ function App() {
           glossary={glossary}
           dishes={dishes}
           weights={weights}
+          currentWeight={currentWeight}
           activities={activities}
           workouts={workouts}
           activityEntries={activityEntries}
@@ -5832,7 +5833,7 @@ Aufgabe: ${aufgabe}`;
       </div>
 
       {/* === Ziel-Widget (Hochzeit etc.) === */}
-      {settings?.targetWeight && settings?.targetDate && (() => {
+      {settings?.targetWeight && settings?.targetDate && settings?.goalEnabled !== false && (() => {
         const start = +settings.startWeight || (sortedWeights[0]?.kg) || latestWeight?.kg || 0;
         const target = +settings.targetWeight;
         const current = latestWeight?.kg || start;
@@ -5844,6 +5845,36 @@ Aufgabe: ${aufgabe}`;
         const totalLoss = start - target;
         const lostSoFar = start - current;
         const progressPct = totalLoss !== 0 ? Math.max(0, Math.min(100, (lostSoFar / totalLoss) * 100)) : 0;
+        const label = settings.goalLabel || 'Ziel';
+        const targetDateStr = targetD.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+        // === Zieltag erreicht oder vorbei ===
+        if (daysLeft < 0) {
+          const reached = current <= target;
+          return (
+            <div style={{
+              background: reached
+                ? 'linear-gradient(135deg, #1A5340 0%, #0D3B2E 100%)'
+                : 'linear-gradient(135deg, #3A3A2E 0%, #2A2A22 100%)',
+              borderRadius: 12, padding: 20, marginBottom: 16, color: '#FAF6EC',
+              border: `1px solid ${reached ? 'rgba(144,200,168,0.4)' : 'rgba(232,168,124,0.3)'}`,
+            }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: 'rgba(250,246,236,0.6)' }}>{label} — abgeschlossen</div>
+              <div style={{ fontSize: 32, marginTop: 8 }}>{reached ? '🎉' : '🏁'}</div>
+              <div style={{ fontFamily: 'Fraunces', fontSize: 18, fontWeight: 600, marginTop: 6 }}>
+                {reached ? 'Ziel erreicht!' : 'Zieltag vorbei'}
+              </div>
+              <div style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.7)', marginTop: 4, lineHeight: 1.5 }}>
+                {reached
+                  ? `Du hast dein Zielgewicht von ${target.toFixed(1).replace('.', ',')} kg erreicht. Stark durchgezogen!`
+                  : `Der ${targetDateStr} ist vorbei. Aktuell ${current.toFixed(1).replace('.', ',')} kg, Ziel war ${target.toFixed(1).replace('.', ',')} kg (${Math.abs(current - target).toFixed(1).replace('.', ',')} kg übrig).`}
+              </div>
+              <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 10 }}>
+                Du kannst in den Einstellungen ein neues Ziel setzen oder das Tracking ausschalten.
+              </div>
+            </div>
+          );
+        }
 
         // Soll heute (linear) - basiert auf Startdatum aus Settings (nicht erster Wiege-Eintrag!)
         const startDateRef = settings.startDate
@@ -5862,9 +5893,6 @@ Aufgabe: ${aufgabe}`;
         const statusText = totalLoss > 0
           ? (onTrack ? 'auf Kurs' : slightlyOff ? 'leicht über Plan' : 'hinterher')
           : (onTrack ? 'auf Kurs' : slightlyOff ? 'leicht hinterher' : 'unter Plan');
-
-        const label = settings.goalLabel || 'Ziel';
-        const targetDateStr = targetD.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
         return (
           <div style={{ background: '#0D3B2E', backgroundImage: 'radial-gradient(circle at top right, #1A5340 0%, #0D3B2E 100%)', borderRadius: 12, padding: 20, marginBottom: 16, color: '#FAF6EC' }}>
@@ -5960,6 +5988,7 @@ Aufgabe: ${aufgabe}`;
           <>
             <div style={{ display: 'flex', gap: 4, marginTop: 12, marginBottom: 8 }}>
               {[
+                { l: '7T', v: 7 },
                 { l: '30T', v: 30 },
                 { l: '90T', v: 90 },
                 { l: '1J', v: 365 },
@@ -5983,7 +6012,7 @@ Aufgabe: ${aufgabe}`;
             </div>
             <WeightChart
               weights={earliestForRange.length >= 2 ? earliestForRange : sortedWeights}
-              goal={settings?.targetWeight && settings?.targetDate ? {
+              goal={settings?.targetWeight && settings?.targetDate && settings?.goalEnabled !== false ? {
                 startKg: +settings.startWeight || sortedWeights[0]?.kg,
                 targetKg: +settings.targetWeight,
                 startDate: settings.startDate || new Date().toISOString().slice(0, 10),
@@ -6577,7 +6606,7 @@ function ApiStatus({ apiKey }) {
 }
 
 // === Settings ===
-function SettingsView({ settings, entries, glossary, dishes = [], weights = [], activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, beerKcal = 145, onBeerKcalChange, cremantKcal = 170, onCremantKcalChange, coffeeKcal = 40, onCoffeeKcalChange, alcoholLog = {}, intimacyLog = [], apiKey = '', onApiKeyChange, onSave, onBack, onImport, onLoadRecipes }) {
+function SettingsView({ settings, entries, glossary, dishes = [], weights = [], currentWeight = 0, activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, beerKcal = 145, onBeerKcalChange, cremantKcal = 170, onCremantKcalChange, coffeeKcal = 40, onCoffeeKcalChange, alcoholLog = {}, intimacyLog = [], apiKey = '', onApiKeyChange, onSave, onBack, onImport, onLoadRecipes }) {
   const [s, setS] = useState(settings);
   const [keyInput, setKeyInput] = useState(apiKey);
   const [keyVisible, setKeyVisible] = useState(false);
@@ -6730,6 +6759,32 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
           </div>
         </Field>
 
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: 'rgba(250,246,236,0.06)', borderRadius: 10, padding: '12px 14px',
+          marginBottom: 16,
+        }}>
+          <div>
+            <div style={{ fontFamily: 'Inter', fontSize: 14, fontWeight: 600, color: '#FAF6EC' }}>
+              Zielgewicht-Tracking
+            </div>
+            <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 2 }}>
+              Widget & Soll-Linie in der Auswertung
+            </div>
+          </div>
+          <button
+            onClick={() => setS({ ...s, goalEnabled: s.goalEnabled === false ? true : false })}
+            style={{
+              background: s.goalEnabled !== false ? '#1A5340' : 'rgba(250,246,236,0.1)',
+              border: `1px solid ${s.goalEnabled !== false ? '#90C8A8' : 'rgba(250,246,236,0.2)'}`,
+              borderRadius: 20, padding: '6px 16px',
+              fontFamily: 'Inter', fontSize: 12, fontWeight: 600,
+              color: '#FAF6EC', cursor: 'pointer', flexShrink: 0,
+            }}
+          >{s.goalEnabled !== false ? 'An' : 'Aus'}</button>
+        </div>
+
+        {s.goalEnabled !== false && <>
         <Field label="Ziel-Bezeichnung">
           <input
             type="text"
@@ -6789,29 +6844,48 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
         </Field>
 
         {s.targetWeight && s.targetDate && (() => {
-          const start = +s.startWeight || +s.weight || 0;
+          // Variante b: ab heute, mit aktuellem Gewicht (Fallback: Startgewicht, dann Profil)
+          const currentKg = currentWeight || +s.startWeight || +s.weight || 0;
           const target = +s.targetWeight;
           const today = new Date();
           today.setHours(0, 0, 0, 0);
           const targetD = new Date(s.targetDate);
           targetD.setHours(0, 0, 0, 0);
           const totalDays = Math.max(1, Math.round((targetD - today) / (1000 * 60 * 60 * 24)));
-          const totalLoss = start - target;
-          const weeklyLoss = (totalLoss / totalDays) * 7;
+          const remainingLoss = currentKg - target;
+          const weeklyLoss = (remainingLoss / totalDays) * 7;
+          const isPast = targetD < today;
           return (
             <div style={{ background: 'rgba(250,246,236,0.08)', borderRadius: 12, padding: 16, marginTop: 8, marginBottom: 16, border: '1px solid rgba(250,246,236,0.15)' }}>
-              <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.6)', marginBottom: 8 }}>Rechnung</div>
-              <div style={{ fontFamily: 'Inter', fontSize: 13, color: '#FAF6EC', lineHeight: 1.7 }}>
-                {totalDays} Tage bis zum Ziel<br/>
-                {totalLoss > 0 ? `${totalLoss.toFixed(1).replace('.', ',')} kg abnehmen` : `${Math.abs(totalLoss).toFixed(1).replace('.', ',')} kg zunehmen`}<br/>
-                <span style={{ color: weeklyLoss > 1.2 ? '#E8A87C' : 'rgba(250,246,236,0.8)' }}>
-                  ≈ {Math.abs(weeklyLoss).toFixed(2).replace('.', ',')} kg pro Woche
-                  {weeklyLoss > 1.2 && ' — ambitioniert'}
-                </span>
-              </div>
+              <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.6)', marginBottom: 8 }}>Rechnung — ab heute</div>
+              {isPast ? (
+                <div style={{ fontFamily: 'Inter', fontSize: 13, color: '#E8A87C', lineHeight: 1.6 }}>
+                  Das Zieldatum liegt in der Vergangenheit. Setze ein neues Datum.
+                </div>
+              ) : (
+                <div style={{ fontFamily: 'Inter', fontSize: 13, color: '#FAF6EC', lineHeight: 1.7 }}>
+                  {totalDays} Tage bis zum Ziel<br/>
+                  {remainingLoss > 0
+                    ? `noch ${remainingLoss.toFixed(1).replace('.', ',')} kg abnehmen`
+                    : remainingLoss < 0
+                      ? `noch ${Math.abs(remainingLoss).toFixed(1).replace('.', ',')} kg zunehmen`
+                      : 'Zielgewicht bereits erreicht'}
+                  {remainingLoss !== 0 && <br/>}
+                  {remainingLoss !== 0 && (
+                    <span style={{ color: Math.abs(weeklyLoss) > 1.2 ? '#E8A87C' : 'rgba(250,246,236,0.8)' }}>
+                      ≈ {Math.abs(weeklyLoss).toFixed(2).replace('.', ',')} kg pro Woche nötig
+                      {Math.abs(weeklyLoss) > 1.2 && ' — ambitioniert'}
+                    </span>
+                  )}
+                  <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 6 }}>
+                    Basierend auf aktuellem Gewicht: {currentKg.toFixed(1).replace('.', ',')} kg
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
+        </>}
 
         <button style={styles.primary} onClick={() => onSave(s)}>Speichern</button>
       </>}
