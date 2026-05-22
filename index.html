@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.43';
+const APP_VERSION = '3.44';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -6096,6 +6096,7 @@ Aufgabe: ${aufgabe}`;
             </div>
             <WeightChart
               weights={earliestForRange.length >= 2 ? earliestForRange : sortedWeights}
+              extendToGoal={weightRange >= 99999}
               goal={settings?.targetWeight && settings?.goalEnabled !== false ? {
                 startKg: +settings.startWeight || sortedWeights[0]?.kg,
                 targetKg: +settings.targetWeight,
@@ -6398,7 +6399,7 @@ Aufgabe: ${aufgabe}`;
 }
 
 // === WeightChart - kleiner SVG-Linien-Graph ===
-function WeightChart({ weights, goal = null }) {
+function WeightChart({ weights, goal = null, extendToGoal = false }) {
   if (!weights || weights.length < 2) return null;
 
   const w = 320, h = 120, pad = { l: 30, r: 8, t: 8, b: 20 };
@@ -6412,11 +6413,15 @@ function WeightChart({ weights, goal = null }) {
   const showGoal = hasGoalKg && goal.targetDate && goal.startKg && goal.startDate;
   const showFlatGoal = hasGoalKg && !goal.targetDate; // waagerechte Linie
 
-  // X-Achse richtet sich NUR nach dem sichtbaren Gewichts-Zeitfenster,
-  // nicht nach dem Zieldatum. Die Soll-Linie wird darauf geclippt.
+  // X-Achse: normalerweise nur das Gewichts-Zeitfenster.
+  // Bei extendToGoal (Ansicht "Alle") mit Zieldatum: bis zum Zieldatum strecken.
   const dates = weights.map(w => new Date(w.date).getTime());
   const minD = dates[0];
-  const maxD = dates[dates.length - 1];
+  let maxD = dates[dates.length - 1];
+  if (extendToGoal && showGoal) {
+    const gEndMs = new Date(goal.targetDate).getTime();
+    if (gEndMs > maxD) maxD = gEndMs;
+  }
   const rangeD = Math.max(1, maxD - minD);
 
   const xFor = (ms) => pad.l + ((ms - minD) / rangeD) * innerW;
@@ -6527,7 +6532,9 @@ function WeightChart({ weights, goal = null }) {
         {new Date(weights[0].date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}
       </text>
       <text x={w - pad.r} y={h - 4} fontSize={9} fontFamily="Inter" fill="#5C6B5E" textAnchor="end">
-        {new Date(weights[weights.length - 1].date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}
+        {extendToGoal && showGoal
+          ? new Date(goal.targetDate).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+          : new Date(weights[weights.length - 1].date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}
       </text>
     </svg>
   );
