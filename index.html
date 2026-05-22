@@ -131,7 +131,7 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.34';
+const APP_VERSION = '3.36';
 const APP_NAME = 'Torcal';
 const COFFEE_KCAL_DEFAULT = 40; // 150ml Kaffee + 50ml Milch 1,5%
 const WATER_ML = 250;   // pro Glas
@@ -826,7 +826,8 @@ function App() {
   const [updateAvailable, setUpdateAvailable] = useState(null); // null | { version }
   const [unlockedAchievements, setUnlockedAchievements] = useState([]); // persistierte IDs
   const [newAchievement, setNewAchievement] = useState(null); // {id, emoji, name, desc} fürs Popup
-  const [streakFreezeData, setStreakFreezeData] = useState({ freezes: 0, usedDates: [], lastWeekClaimed: null }); // Freeze-System
+  // Freeze-System: earned (kumulativ verdient), frozenDates (gerettete Tage), lastDailyCheck, systemStart
+  const [freezeData, setFreezeData] = useState(null); // null = noch nicht geladen
   const [selectedDate, setSelectedDate] = useState(todayKey());
   const [pendingDishItems, setPendingDishItems] = useState(null);
   const [pendingWorkoutItems, setPendingWorkoutItems] = useState(null);
@@ -1010,7 +1011,14 @@ function App() {
       const cofkc = await loadKey('coffeeKcal', COFFEE_KCAL_DEFAULT);
       const intim = await loadKey('intimacyLog', []);
       const unlockedAchs = await loadKey('unlockedAchievements', []);
-      const freezeData = await loadKey('streakFreezeData', { freezes: 0, usedDates: [], lastWeekClaimed: null });
+      // Aufräumen: altes Freeze-System (v3.29-3.33) entfernen, war fehleranfällig
+      await saveKey('streakFreezeData', null).catch(() => {});
+      // Neues Freeze-System v3.36: bei erster Nutzung mit systemStart = heute initialisieren
+      let fd = await loadKey('freezeData', null);
+      if (!fd || !fd.systemStart) {
+        fd = { earned: 0, frozenDates: [], lastDailyCheck: null, systemStart: todayKey() };
+        await saveKey('freezeData', fd);
+      }
       const showAlc = await loadKey('showAlcohol', false);
       const showInt = await loadKey('showIntimacy', false);
       setSettings(s);
@@ -1034,7 +1042,7 @@ function App() {
       setCoffeeKcal(cofkc);
       setIntimacyLog(intim);
       setUnlockedAchievements(unlockedAchs);
-      setStreakFreezeData(freezeData);
+      setFreezeData(fd);
       setShowAlcohol(showAlc);
       setShowIntimacy(showInt);
       // Einmalige Bereinigung: Einträge mit ungültigem Slot reparieren
@@ -1137,95 +1145,85 @@ function App() {
   // Wischgesten-Ref muss vor early return stehen (Hook-Regel)
   const swipeStateRef = useRef(null);
 
-  // Aktuelles Gewicht: letzter Wiegen-Eintrag oder Setup-Gewicht
-  // Streak: aufeinanderfolgende Tage mit mind. einem Eintrag
-  // === Streak mit Freeze-System und vorausgetragenen Tagen ===
-  const streakInfo = (() => {
+  // === Streak mit Freeze-System ===
+  // Aufeinanderfolgende Tage mit Eintrag (oder per Freeze gerettet), rückwärts ab heute.
+  const frozenDatesSet = new Set(freezeData?.frozenDates || []);
+  const streak = (() => {
     const today = todayKey();
     const hasEntryOn = (key) => entries.some(e => e.dateKey === key) || activityEntries.some(a => a.dateKey === key);
-
-    // Schritt 1: aktuellen Streak rückwärts ab heute zählen.
-    // Lücken werden mit Freezes überbrückt.
     let count = 0;
     let d = new Date();
-    let freezesAvailable = streakFreezeData.freezes || 0;
-    const usedDates = [...(streakFreezeData.usedDates || [])];
-    const newlyUsedFreezeDates = [];
-
-    // Erst zählen wir vorausgetragene Zukunftstage NICHT in die Zahl,
-    // aber sie sichern den Streak ab (siehe Schritt 3 unten).
-
     for (let i = 0; i < 400; i++) {
       const key = todayKey(d);
       const has = hasEntryOn(key);
-
       if (has) {
         count++;
       } else if (key === today) {
-        // Heute noch kein Eintrag → Streak noch nicht abgerissen, einfach weiter
+        // Heute noch kein Eintrag — Streak läuft bis Mitternacht weiter
         d.setDate(d.getDate() - 1);
         continue;
+      } else if (frozenDatesSet.has(key)) {
+        // Tag wurde mit Freeze gerettet — Streak läuft weiter
+        count++;
       } else {
-        // Lücke an einem vergangenen Tag
-        if (usedDates.includes(key)) {
-          // Dieser Tag wurde schon mit Freeze gerettet → Streak läuft weiter
-          count++;
-        } else if (freezesAvailable > 0) {
-          // Freeze automatisch einsetzen
-          freezesAvailable--;
-          newlyUsedFreezeDates.push(key);
-          count++;
-        } else {
-          // Kein Freeze mehr → Streak reißt hier
-          break;
-        }
+        // Echte Lücke — Streak endet hier
+        break;
       }
       d.setDate(d.getDate() - 1);
     }
-
-    return {
-      count,
-      freezesAvailable,
-      newlyUsedFreezeDates,
-      usedDates,
-    };
+    return count;
   })();
 
-  const streak = streakInfo.count;
-
-  // === Freeze-Verwaltung: verbrauchte Freezes persistieren + neue Wochen-Freezes vergeben ===
+  // === Freeze Daily-Check: einmal pro Tageswechsel, deterministisch ===
+  // Prüft Lücken zwischen lastDailyCheck und heute. Setzt Freezes ein,
+  // so viele wie nötig und vorhanden. Nur Tage ab systemStart.
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || !freezeData) return;
+    const today = todayKey();
+    if (freezeData.lastDailyCheck === today) return; // heute schon gelaufen
 
-    let changed = false;
-    let nextData = { ...streakFreezeData };
+    const hasEntryOn = (key) => entries.some(e => e.dateKey === key) || activityEntries.some(a => a.dateKey === key);
 
-    // 1) Neu verbrauchte Freezes eintragen
-    if (streakInfo.newlyUsedFreezeDates.length > 0) {
-      nextData = {
-        ...nextData,
-        freezes: Math.max(0, (nextData.freezes || 0) - streakInfo.newlyUsedFreezeDates.length),
-        usedDates: [...(nextData.usedDates || []), ...streakInfo.newlyUsedFreezeDates],
-      };
-      changed = true;
+    let frozenDates = [...freezeData.frozenDates];
+    const last = freezeData.lastDailyCheck;
+
+    if (last !== null) {
+      // Tage strikt zwischen last und heute prüfen
+      const lastD = new Date(last);
+      const d = new Date(lastD);
+      d.setDate(d.getDate() + 1);
+      const todayD = new Date(today);
+      while (d < todayD) {
+        const key = todayKey(d);
+        if (key >= freezeData.systemStart && !hasEntryOn(key) && !frozenDates.includes(key)) {
+          const available = freezeData.earned - frozenDates.length;
+          if (available > 0) {
+            frozenDates.push(key);
+          }
+          // kein Freeze -> Lücke bleibt, Streak reißt
+        }
+        d.setDate(d.getDate() + 1);
+      }
     }
 
-    // 2) Wochen-Freeze vergeben: alle 7 Streak-Tage einen Freeze, max 3
-    // lastWeekClaimed speichert, bei welchem Streak-Stand zuletzt ein Freeze vergeben wurde
-    const earnedThreshold = Math.floor(streak / 7) * 7;
-    const lastClaimed = nextData.lastWeekClaimed || 0;
-    if (earnedThreshold >= 7 && earnedThreshold > lastClaimed) {
-      const weeksToGrant = (earnedThreshold - lastClaimed) / 7;
-      const newFreezeCount = Math.min(3, (nextData.freezes || 0) + weeksToGrant);
-      nextData = { ...nextData, freezes: newFreezeCount, lastWeekClaimed: earnedThreshold };
-      changed = true;
-    }
+    const nextFd = { ...freezeData, frozenDates, lastDailyCheck: today };
+    setFreezeData(nextFd);
+    saveKey('freezeData', nextFd);
+  }, [loaded, freezeData, entries, activityEntries]);
 
-    if (changed) {
-      setStreakFreezeData(nextData);
-      saveKey('streakFreezeData', nextData);
+  // === Freeze verdienen: 1 pro 7 Streak-Tage, max 3 gleichzeitig verfügbar ===
+  useEffect(() => {
+    if (!loaded || !freezeData) return;
+    const used = freezeData.frozenDates.length;
+    const targetEarned = Math.min(Math.floor(streak / 7), used + 3);
+    if (targetEarned > freezeData.earned) {
+      const nextFd = { ...freezeData, earned: targetEarned };
+      setFreezeData(nextFd);
+      saveKey('freezeData', nextFd);
     }
-  }, [loaded, streak, streakInfo.newlyUsedFreezeDates.join(',')]);
+  }, [loaded, streak, freezeData]);
+
+  const freezesAvailable = freezeData ? Math.max(0, freezeData.earned - freezeData.frozenDates.length) : 0;
 
 
   // === Achievements ===
@@ -1692,8 +1690,8 @@ function App() {
           streak={streak}
           achievements={allAchievements}
           unlockedCount={unlockedCount}
-          freezesAvailable={streakInfo.freezesAvailable}
-          freezeUsedDates={streakFreezeData.usedDates || []}
+          freezesAvailable={freezesAvailable}
+          freezeUsedDates={freezeData?.frozenDates || []}
           onExportDay={(deep = false) => {
             const date = selectedDate;
             const allDayEntries = entries.filter(e => e.dateKey === date); // alle inkl. Kaffee
@@ -3444,7 +3442,6 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
                       : 'Tracke 7 Tage am Stück für einen Freeze'}
                   </div>
                 </div>
-                {/* Freeze-Icons */}
                 <div style={{ display: 'flex', gap: 3 }}>
                   {[0, 1, 2].map(i => (
                     <div key={i} style={{
@@ -3455,14 +3452,13 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
                 </div>
               </div>
               <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.55)', marginTop: 8, lineHeight: 1.5 }}>
-                Für jede volle durchgetrackte Woche gibt es einen Freeze (max. 3). Vergisst du einen Tag, wird automatisch ein Freeze eingesetzt und dein Streak läuft weiter.
+                Für jede volle durchgetrackte Woche gibt es einen Freeze (max. 3). Vergisst du einen Tag, wird automatisch ein Freeze eingesetzt — aber nur, wenn du ihn zu dem Zeitpunkt schon besessen hast.
               </div>
               {freezeUsedDates.length > 0 && (() => {
-                // Zeige die letzten 1-2 eingesetzten Freezes
-                const recent = [...freezeUsedDates].sort().slice(-2);
+                const recent = [...freezeUsedDates].sort().slice(-3);
                 return (
                   <div style={{ fontFamily: 'Inter', fontSize: 11, color: '#78B4E6', marginTop: 6 }}>
-                    Zuletzt gerettet: {recent.map(d => {
+                    Gerettet: {recent.map(d => {
                       const dt = new Date(d);
                       return dt.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
                     }).join(', ')}
