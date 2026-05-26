@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.45';
+const APP_VERSION = '3.46';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.46', changes: ['Rad-Schnelltracker: pro Tag aktivierbar, nur Minuten eintragen (MET 7)'] },
   { v: '3.45', changes: ['Versionshistorie unter Daten einsehbar'] },
   { v: '3.44', changes: ['Ansicht "Alle" zeigt den ganzen Weg bis zum Zieldatum'] },
   { v: '3.43', changes: ['Zielgewicht ohne Datum: Prognose-Modus mit waagerechter Ziel-Linie', 'Prognose aus Tempo der letzten 30 Tage'] },
@@ -840,6 +841,7 @@ function App() {
   const [waterGoal, setWaterGoal] = useState(8);
   const [alcoholLog, setAlcoholLog] = useState({}); // { 'YYYY-MM-DD': { beer: n, cremant: n } }
   const [alcoholActiveDays, setAlcoholActiveDays] = useState({}); // { 'YYYY-MM-DD': true } - Tage, an denen Alkohol-Tracker aktiv ist
+  const [bikeActiveDays, setBikeActiveDays] = useState({}); // { 'YYYY-MM-DD': true } - Tage, an denen Rad-Schnelltracker aktiv ist
   const [beerKcal, setBeerKcal] = useState(BEER_KCAL_DEFAULT);
   const [cremantKcal, setCremantKcal] = useState(CREMANT_KCAL_DEFAULT);
   const [coffeeKcal, setCoffeeKcal] = useState(COFFEE_KCAL_DEFAULT);
@@ -1031,6 +1033,7 @@ function App() {
       const wg = await loadKey('waterGoal', 8);
       const alc = await loadKey('alcoholLog', {});
       const alcDays = await loadKey('alcoholActiveDays', {});
+      const bikeDays = await loadKey('bikeActiveDays', {});
       const bkc = await loadKey('beerKcal', BEER_KCAL_DEFAULT);
       const ckc = await loadKey('cremantKcal', CREMANT_KCAL_DEFAULT);
       const cofkc = await loadKey('coffeeKcal', COFFEE_KCAL_DEFAULT);
@@ -1062,6 +1065,7 @@ function App() {
       setWaterGoal(wg);
       setAlcoholLog(alc);
       setAlcoholActiveDays(alcDays);
+      setBikeActiveDays(bikeDays);
       setBeerKcal(bkc);
       setCremantKcal(ckc);
       setCoffeeKcal(cofkc);
@@ -1147,6 +1151,7 @@ function App() {
   const persistWaterGoal = async (next) => { setWaterGoal(next); await saveKey('waterGoal', next); };
   const persistAlcoholLog = async (next) => { setAlcoholLog(next); await saveKey('alcoholLog', next); };
   const persistAlcoholActiveDays = async (next) => { setAlcoholActiveDays(next); await saveKey('alcoholActiveDays', next); };
+  const persistBikeActiveDays = async (next) => { setBikeActiveDays(next); await saveKey('bikeActiveDays', next); };
   const persistBeerKcal = async (next) => { setBeerKcal(next); await saveKey('beerKcal', next); };
   const persistCremantKcal = async (next) => { setCremantKcal(next); await saveKey('cremantKcal', next); };
   const persistCoffeeKcal = async (next) => { setCoffeeKcal(next); await saveKey('coffeeKcal', next); };
@@ -1670,6 +1675,36 @@ function App() {
             delete next[selectedDate];
             await persistAlcoholActiveDays(next);
           }}
+          bikeActiveToday={(() => {
+            // Sichtbar wenn: für diesen Tag aktiviert ODER bereits Rad-Eintrag für diesen Tag
+            if (bikeActiveDays[selectedDate]) return true;
+            return activityEntries.some(a => a.dateKey === selectedDate && a.activityId === '__bike_quick__');
+          })()}
+          onBikeActivate={async () => {
+            await persistBikeActiveDays({ ...bikeActiveDays, [selectedDate]: true });
+          }}
+          onBikeDeactivate={async () => {
+            const next = { ...bikeActiveDays };
+            delete next[selectedDate];
+            await persistBikeActiveDays(next);
+          }}
+          onBikeAdd={async (minutes) => {
+            const mins = +minutes;
+            if (!mins || mins <= 0) return;
+            const kcal = calcActivityKcal(7, currentWeight, mins);
+            await persistActivityEntries([...activityEntries, {
+              id: crypto.randomUUID(),
+              dateKey: selectedDate,
+              time: new Date().toISOString(),
+              activityId: '__bike_quick__',
+              activityName: 'Radfahren Pendeln',
+              met: 7,
+              durationMin: mins,
+              weightKg: currentWeight,
+              kcal,
+            }]);
+          }}
+          bikeEntriesToday={activityEntries.filter(a => a.dateKey === selectedDate && a.activityId === '__bike_quick__')}
           beerKcal={beerKcal}
           cremantKcal={cremantKcal}
           coffeeKcal={coffeeKcal}
@@ -2657,7 +2692,7 @@ function ActivityEditor({ entry, activities, currentWeight, onSave, onDelete, on
   );
 }
 
-function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, alcoholActiveToday = false, onAlcoholActivate, onAlcoholDeactivate, beerKcal = 145, cremantKcal = 170, coffeeKcal = 40, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0, achievements = [], unlockedCount = 0, freezesAvailable = 0, freezeUsedDates = [], onConfirmMany, settings }) {
+function Today({ target, consumed, burned, remaining, entries, activities, activityEntries, allEntries, glossary, dishes, selectedDate, setSelectedDate, onAdd, onAddSpeech, onAddMovement, onDelete, onDeleteMany, onUpdateEntry, onSaveDish, onRepeatYesterday, onDeleteActivity, onUpdateActivity, onDeleteActivities, onSaveWorkout, onGoToStats, onGoToMovement, currentWeight, coffeeCount, onCoffeeAdd, onCoffeeRemove, waterCount, onWaterAdd, onWaterRemove, waterGoal = 8, onExportDay, alcoholActiveToday = false, onAlcoholActivate, onAlcoholDeactivate, bikeActiveToday = false, onBikeActivate, onBikeDeactivate, onBikeAdd, bikeEntriesToday = [], beerKcal = 145, cremantKcal = 170, coffeeKcal = 40, alcoholDay = {}, onAlcoholAdd, onAlcoholRemove, streak = 0, achievements = [], unlockedCount = 0, freezesAvailable = 0, freezeUsedDates = [], onConfirmMany, settings }) {
   const isToday = selectedDate === todayKey();
   const netConsumed = Math.max(0, consumed - burned);
   const pct = Math.min(100, (consumed / target) * 100); // Balken = gegessen (brutto)
@@ -2685,6 +2720,7 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
   });
   const [collapsedSlots, setCollapsedSlots] = useState(new Set()); // leere Set = alle offen
   const [showStreakInfo, setShowStreakInfo] = useState(false);
+  const [bikeMinutes, setBikeMinutes] = useState('');
 
   const toggleSlot = (slot) => {
     setCollapsedSlots(prev => {
@@ -3278,6 +3314,89 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
               Tracker für heute schließen
             </button>
           )}
+        </div>
+      )}
+
+      {/* Rad-Aktivieren Hint — wenn nicht aktiv */}
+      {!selectMode && !bikeActiveToday && (
+        <div style={{ marginBottom: 4 }}>
+          <button
+            onClick={onBikeActivate}
+            style={{
+              width: '100%', background: 'rgba(250,246,236,0.04)',
+              border: '1px dashed rgba(250,246,236,0.2)', borderRadius: 12,
+              padding: '8px 12px', cursor: 'pointer',
+              fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}
+          >
+            <span style={{ fontSize: 13 }}>🚴</span>
+            <span>Radfahrt für diesen Tag tracken</span>
+          </button>
+        </div>
+      )}
+
+      {/* Rad-Schnelltracker — pro Tag */}
+      {!selectMode && bikeActiveToday && (
+        <div style={{ marginBottom: 4 }}>
+          <div style={{ background: 'rgba(250,246,236,0.08)', border: '1px solid rgba(250,246,236,0.15)', borderRadius: 12, padding: '12px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 20, flexShrink: 0 }}>🚴</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>Radfahrt</div>
+                <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)' }}>Minuten eintragen</div>
+              </div>
+              <input
+                type="number"
+                inputMode="numeric"
+                placeholder="Min"
+                value={bikeMinutes}
+                onChange={e => setBikeMinutes(e.target.value)}
+                style={{
+                  width: 64, padding: '8px 6px', textAlign: 'center',
+                  background: 'rgba(250,246,236,0.1)', border: '1px solid rgba(250,246,236,0.25)',
+                  borderRadius: 8, color: '#FAF6EC', fontSize: 14, fontFamily: 'Inter',
+                  outline: 'none', flexShrink: 0,
+                }}
+              />
+              <button
+                onClick={async () => {
+                  if (!bikeMinutes || +bikeMinutes <= 0) return;
+                  await onBikeAdd(bikeMinutes);
+                  setBikeMinutes('');
+                }}
+                style={{
+                  background: 'rgba(144,200,168,0.2)', border: '1px solid rgba(144,200,168,0.4)',
+                  borderRadius: 8, padding: '8px 12px', color: '#FAF6EC',
+                  fontFamily: 'Inter', fontSize: 13, fontWeight: 600, cursor: 'pointer', flexShrink: 0,
+                }}
+              >+</button>
+            </div>
+            {/* Heutige Rad-Einträge */}
+            {bikeEntriesToday.length > 0 && (
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(250,246,236,0.1)' }}>
+                {bikeEntriesToday.map(e => (
+                  <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.75)', padding: '2px 0' }}>
+                    <span>{e.durationMin} min Radfahrt</span>
+                    <span className="num">+{e.kcal} kcal</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Tracker schließen — nur wenn keine Einträge */}
+            {bikeEntriesToday.length === 0 && (
+              <button
+                onClick={onBikeDeactivate}
+                style={{
+                  width: '100%', background: 'transparent', border: 'none',
+                  padding: '4px', marginTop: 4, cursor: 'pointer',
+                  fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.4)',
+                }}
+              >
+                Tracker für heute schließen
+              </button>
+            )}
+          </div>
         </div>
       )}
 
