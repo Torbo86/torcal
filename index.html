@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.49';
+const APP_VERSION = '3.50';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.50', changes: ['Export aufgeräumt: nur noch ein Knopf "Analyse kopieren"'] },
   { v: '3.49', changes: ['Deep-Analyse enthält jetzt den Gewichtsverlauf mit Trend'] },
   { v: '3.48', changes: ['Wort-basierte Lebensmittelsuche ("bohnen grün" findet "Grüne Bohnen")', '139 Standard-Lebensmittel automatisch ergänzt'] },
   { v: '3.47', changes: ['Essen & Sport auch an vergangenen Tagen nachtragbar', 'API-Key-Feld löst kein Passwort-Speichern mehr aus'] },
@@ -2250,7 +2251,7 @@ function App() {
               text = `# Torcal Tagesexport — ${date}\n\n**Tagesziel:** ${dailyTarget} kcal\n**Gegessen:** ${consumed} kcal\n**Verbrannt:** ${burned} kcal\n**Netto:** ${consumed - burned} kcal\n**Verbleibend:** ${dailyTarget + burned - consumed} kcal\n\n**Makros:** Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n${coffeeLines}${slotLines}${actLines ? '\n\n' + actLines : ''}`;
             }
             navigator.clipboard.writeText(text).then(() => {
-              alert(deep ? 'Deep-Analyse kopiert! In neuen Claude-Chat einfügen.' : 'Tag kopiert!');
+              alert(deep ? 'Analyse kopiert! In einen Claude-Chat einfügen für die Auswertung.' : 'Tag kopiert!');
             }).catch(() => alert(text));
           }}
         />
@@ -6614,29 +6615,21 @@ Aufgabe: ${aufgabe}`;
 
         {/* Export-Buttons */}
         {onExportDay && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button
-              onClick={() => onExportDay(false)}
-              style={{
-                flex: 1, background: 'rgba(13,59,46,0.08)', color: '#0D3B2E',
-                border: '1px solid rgba(13,59,46,0.2)', borderRadius: 8,
-                padding: '10px 12px', fontFamily: 'Inter', fontSize: 12, fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              📋 Tag kopieren
-            </button>
+          <div style={{ marginTop: 10 }}>
             <button
               onClick={() => onExportDay(true)}
               style={{
-                flex: 1, background: 'rgba(13,59,46,0.08)', color: '#0D3B2E',
+                width: '100%', background: 'rgba(13,59,46,0.08)', color: '#0D3B2E',
                 border: '1px solid rgba(13,59,46,0.2)', borderRadius: 8,
                 padding: '10px 12px', fontFamily: 'Inter', fontSize: 12, fontWeight: 600,
                 cursor: 'pointer',
               }}
             >
-              🔬 Deep-Analyse kopieren
+              📋 Analyse kopieren
             </button>
+            <div style={{ fontFamily: 'Inter', fontSize: 10, color: '#5C6B5E', marginTop: 4, textAlign: 'center' }}>
+              Kopiert Tag, Makros & Gewichtsverlauf — zum Einfügen in einen Claude-Chat
+            </div>
           </div>
         )}
 
