@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.52';
+const APP_VERSION = '3.53';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.53', changes: ['Kaffee-Kachel: Milch-Makros korrekt hinterlegt und skalierend'] },
   { v: '3.52', changes: ['Analyse schätzt fehlende Makros bei grob getrackten Einträgen'] },
   { v: '3.51', changes: ['Mehrtages-Analyse: 3, 7 oder 14 Tage zusammen exportieren'] },
   { v: '3.50', changes: ['Export aufgeräumt: nur noch ein Knopf "Analyse kopieren"'] },
@@ -1769,11 +1770,13 @@ function App() {
             await persistCoffeeLog(next);
             const newCount = prev + 1;
             const newKcal = newCount * coffeeKcal;
+            // Milch-Makros pro Tasse (~50 ml Milch 1,5%): P 1.7, K 2.4, F 0.75
+            const coffeeMacros = { protein: 1.7 * newCount, carbs: 2.4 * newCount, fat: 0.75 * newCount };
             // Bestehenden Kaffee-Eintrag aktualisieren oder neu anlegen
             const existing = entries.find(e => e.isCoffee && e.dateKey === date);
             if (existing) {
               await persistEntries(entries.map(e => e.id === existing.id
-                ? { ...e, qty: newCount, kcal: newKcal, foodName: `Kaffee mit Milch ×${newCount}` }
+                ? { ...e, qty: newCount, kcal: newKcal, ...coffeeMacros, foodName: `Kaffee mit Milch ×${newCount}` }
                 : e));
             } else {
               await persistEntries([...entries, {
@@ -1783,7 +1786,7 @@ function App() {
                 foodName: `Kaffee mit Milch ×${newCount}`,
                 qty: newCount, unit: 'Tasse',
                 kcal: newKcal,
-                protein: 0.5 * newCount, carbs: 2 * newCount, fat: 0.8 * newCount,
+                ...coffeeMacros,
                 slot: 'Snack',
                 isCoffee: true,
               }]);
@@ -1801,7 +1804,9 @@ function App() {
               await persistEntries(entries.filter(e => e.id !== existing.id));
             } else {
               await persistEntries(entries.map(e => e.id === existing.id
-                ? { ...e, qty: newCount, kcal: newCount * coffeeKcal, foodName: `Kaffee mit Milch ×${newCount}` }
+                ? { ...e, qty: newCount, kcal: newCount * coffeeKcal,
+                    protein: 1.7 * newCount, carbs: 2.4 * newCount, fat: 0.75 * newCount,
+                    foodName: `Kaffee mit Milch ×${newCount}` }
                 : e));
             }
           }}
