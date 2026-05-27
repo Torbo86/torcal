@@ -131,11 +131,13 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.53';
+const APP_VERSION = '3.55';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.55', changes: ['OpenFoodFacts-Suche überarbeitet: bessere Strategien, neue API v2, Relevanz-Ranking', 'DE→EN-Übersetzungen für Eis, Wurst, Schinken, Sahne u.v.m.'] },
+  { v: '3.54', changes: ['Notfall-Workflow: Lebensmittel per Claude-Chat anfragen und JSON-Antwort einfügen'] },
   { v: '3.53', changes: ['Kaffee-Kachel: Milch-Makros korrekt hinterlegt und skalierend'] },
   { v: '3.52', changes: ['Analyse schätzt fehlende Makros bei grob getrackten Einträgen'] },
   { v: '3.51', changes: ['Mehrtages-Analyse: 3, 7 oder 14 Tage zusammen exportieren'] },
@@ -844,55 +846,111 @@ Regeln:
 
 // Übersetzungstabelle DE→EN für bessere OFF-Suche
 const DE_EN = {
+  // Grundnahrungsmittel
   'haferflocken':'oats','hafer':'oats','milch':'milk','vollmilch':'whole milk',
   'magermilch':'skim milk','butter':'butter','käse':'cheese','joghurt':'yogurt',
   'magerquark':'quark','quark':'quark','ei':'egg','eier':'eggs','brot':'bread',
   'vollkornbrot':'whole grain bread','nudeln':'pasta','reis':'rice','kartoffeln':'potatoes',
-  'apfel':'apple','banane':'banana','tomate':'tomato','gurke':'cucumber',
-  'hähnchen':'chicken','hühnchen':'chicken','rindfleisch':'beef','schweinefleisch':'pork',
-  'lachs':'salmon','thunfisch':'tuna','linsen':'lentils','kichererbsen':'chickpeas',
-  'mandeln':'almonds','walnüsse':'walnuts','nüsse':'nuts','olivenöl':'olive oil',
-  'zucker':'sugar','mehl':'flour','schokolade':'chocolate','erdbeeren':'strawberries',
-  'himbeeren':'raspberries','blaubeeren':'blueberries','spinat':'spinach',
-  'brokkoli':'broccoli','karotten':'carrots','möhren':'carrots','zwiebeln':'onions',
-  'knoblauch':'garlic','paprika':'bell pepper','salat':'lettuce','gurken':'cucumber',
+  'mehl':'flour','zucker':'sugar','salz':'salt','sahne':'cream','schlagsahne':'whipping cream',
+  // Obst
+  'apfel':'apple','banane':'banana','orange':'orange','birne':'pear','traube':'grape',
+  'erdbeeren':'strawberries','himbeeren':'raspberries','blaubeeren':'blueberries',
+  'heidelbeeren':'blueberries','kirschen':'cherries','pfirsich':'peach','mango':'mango',
+  'ananas':'pineapple','kiwi':'kiwi','melone':'melon','zitrone':'lemon',
+  // Gemüse
+  'tomate':'tomato','gurke':'cucumber','gurken':'cucumber','salat':'lettuce',
+  'spinat':'spinach','brokkoli':'broccoli','karotten':'carrots','möhren':'carrots',
+  'zwiebeln':'onions','knoblauch':'garlic','paprika':'bell pepper','bohnen':'beans',
+  'erbsen':'peas','rosenkohl':'brussels sprouts','blumenkohl':'cauliflower',
+  'champignons':'mushrooms','pilze':'mushrooms','aubergine':'eggplant','zucchini':'zucchini',
+  'avocado':'avocado','mais':'corn','kürbis':'pumpkin',
+  // Fleisch & Fisch
+  'hähnchen':'chicken','hühnchen':'chicken','huhn':'chicken','pute':'turkey',
+  'rindfleisch':'beef','rind':'beef','schweinefleisch':'pork','schwein':'pork',
+  'kalb':'veal','wurst':'sausage','schinken':'ham','speck':'bacon','salami':'salami',
+  'lachs':'salmon','thunfisch':'tuna','forelle':'trout','hering':'herring','garnelen':'shrimp',
+  // Hülsenfrüchte & Nüsse
+  'linsen':'lentils','kichererbsen':'chickpeas','mandeln':'almonds','walnüsse':'walnuts',
+  'nüsse':'nuts','cashew':'cashew','erdnüsse':'peanuts','haselnüsse':'hazelnuts',
+  // Öle, Süßes, Snacks
+  'olivenöl':'olive oil','rapsöl':'canola oil','schokolade':'chocolate','keks':'cookie',
+  'kekse':'cookies','pralinen':'pralines','eis':'ice cream','speiseeis':'ice cream',
+  'pfefferminz':'mint','pfefferminze':'mint','vanille':'vanilla','schoko':'chocolate',
+  'erdbeere':'strawberry','honig':'honey','marmelade':'jam','chips':'chips',
+  // Getränke
+  'wasser':'water','saft':'juice','apfelsaft':'apple juice','orangensaft':'orange juice',
+  'bier':'beer','wein':'wine','kaffee':'coffee','tee':'tea','cola':'cola','limonade':'lemonade',
 };
 
 const lookupOpenFoodFactsMany = async (name, pageSize = 15) => {
   const nameLower = name.toLowerCase().trim();
-  const searchTerms = [name];
-  // EN-Übersetzung hinzufügen
-  for (const [de, en] of Object.entries(DE_EN)) {
-    if (nameLower.includes(de)) { if (!searchTerms.includes(en)) searchTerms.push(en); break; }
+  const words = nameLower.split(/\s+/).filter(Boolean);
+
+  // Suchstrategien: Original, einzelne Wörter, EN-Übersetzung pro Wort
+  const searchTerms = new Set([name]);
+  for (const w of words) {
+    const en = DE_EN[w];
+    if (en) searchTerms.add(en);
+    if (words.length > 1) searchTerms.add(w);
   }
+  // Zusätzlich: alle Wörter durch EN ersetzen wenn möglich
+  if (words.length > 1) {
+    const translated = words.map(w => DE_EN[w] || w).join(' ');
+    if (translated !== nameLower) searchTerms.add(translated);
+  }
+
   const results = [];
   const seen = new Set();
-  await Promise.all(searchTerms.map(async term => {
-    try {
-      const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=${pageSize}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!data.products) return;
-      for (const p of data.products) {
-        const n = p.nutriments;
-        if (!n) continue;
-        const kcal = n['energy-kcal_100g'] || n['energy-kcal'];
-        if (!kcal || kcal < 1) continue;
-        const pname = p.product_name_de || p.product_name || term;
-        const key = pname.toLowerCase().slice(0, 20);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        results.push({
-          source: 'OpenFoodFacts', name: pname, brand: p.brands || null,
-          kcalPer100g: Math.round(kcal),
-          protein: n.proteins_100g != null ? Math.round(n.proteins_100g * 10) / 10 : 0,
-          carbs: n.carbohydrates_100g != null ? Math.round(n.carbohydrates_100g * 10) / 10 : 0,
-          fat: n.fat_100g != null ? Math.round(n.fat_100g * 10) / 10 : 0,
-        });
-      }
-    } catch {}
-  }));
-  return results.slice(0, pageSize);
+
+  const fetchTerm = async (term) => {
+    // Versuche zuerst die neue API v2, dann fallback auf cgi/search.pl
+    const urls = [
+      `https://world.openfoodfacts.org/api/v2/search?search_terms=${encodeURIComponent(term)}&page_size=${pageSize}&fields=product_name,product_name_de,brands,nutriments`,
+      `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=${pageSize}`,
+    ];
+    for (const url of urls) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const data = await res.json();
+        const products = data.products || [];
+        if (products.length === 0) continue;
+        for (const p of products) {
+          const n = p.nutriments;
+          if (!n) continue;
+          const kcal = n['energy-kcal_100g'] || n['energy-kcal'];
+          if (!kcal || kcal < 1 || kcal > 950) continue;
+          const pname = p.product_name_de || p.product_name;
+          if (!pname || pname.trim().length < 2) continue;
+          const key = pname.toLowerCase().slice(0, 30) + '|' + (p.brands || '').slice(0, 10);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          results.push({
+            source: 'OpenFoodFacts', name: pname.trim(),
+            brand: p.brands || null,
+            kcalPer100g: Math.round(kcal),
+            protein: n.proteins_100g != null ? Math.round(n.proteins_100g * 10) / 10 : 0,
+            carbs: n.carbohydrates_100g != null ? Math.round(n.carbohydrates_100g * 10) / 10 : 0,
+            fat: n.fat_100g != null ? Math.round(n.fat_100g * 10) / 10 : 0,
+          });
+        }
+        return; // erste erfolgreiche URL reicht
+      } catch {}
+    }
+  };
+
+  await Promise.all([...searchTerms].slice(0, 4).map(fetchTerm));
+
+  // Relevanz-Ranking: Wie viele Suchwörter sind im Treffer-Namen enthalten?
+  const scored = results.map(r => {
+    const nLow = r.name.toLowerCase();
+    const matchedWords = words.filter(w => nLow.includes(w)).length;
+    const startsWith = words.length > 0 && nLow.startsWith(words[0]) ? 1 : 0;
+    const hasBrand = r.brand ? 0.3 : 0;
+    return { r, score: matchedWords + startsWith + hasBrand };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map(s => s.r).slice(0, pageSize);
 };
 
 const lookupClaude = async (name, apiKey) => {
@@ -4282,6 +4340,9 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
   const [screen, setScreen] = useState(initialScreen); // food | movement
   const [mode, setModeRaw] = useState(initialMode); // text | speech | dish
   const [textInput, setTextInput] = useState('');
+  // Chat-Import: Eingabefeld für JSON-Antwort + Vorschau
+  const [chatImportText, setChatImportText] = useState('');
+  const [showChatImport, setShowChatImport] = useState(false);
   const [parsed, setParsed] = useState([]);
   const [slot, setSlot] = useState(initialSlot || guessMealSlot());
   // Datum: wenn initialDate gesetzt (z.B. zukünftiger Tag), dieses verwenden
@@ -4528,6 +4589,32 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
     if (detectedSlot) setSlot(detectedSlot);
     if (detectedOffset !== 0) setDateOffset(detectedOffset);
   };
+
+  // Chat-Import: JSON aus dem Chat-Antworttext extrahieren und validieren
+  const parseChatImport = (raw) => {
+    if (!raw || !raw.trim()) return null;
+    let text = raw.trim();
+    // Markdown-Codeblock entfernen falls vorhanden
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    // Falls drumherum noch Text steht, suche das erste { ... }
+    if (!text.startsWith('{')) {
+      const m = text.match(/\{[\s\S]*\}/);
+      if (m) text = m[0];
+    }
+    try {
+      const obj = JSON.parse(text);
+      if (typeof obj !== 'object' || !obj.name || typeof obj.kcalPer100g !== 'number') return null;
+      return {
+        name: String(obj.name).trim(),
+        kcalPer100g: +obj.kcalPer100g,
+        protein: +(obj.protein || 0),
+        carbs: +(obj.carbs || 0),
+        fat: +(obj.fat || 0),
+        units: obj.units && typeof obj.units === 'object' ? obj.units : { g: 1 },
+      };
+    } catch { return null; }
+  };
+  const chatImportParsed = parseChatImport(chatImportText);
 
   const onSearchChange = (q) => {
     setTextInput(q);
@@ -4834,6 +4921,114 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
               <button style={styles.secondary} onClick={handleTextSubmit}>
                 Als Satz parsen
               </button>
+
+              {/* Chat-Workflow: Lebensmittel per Claude-Chat anfragen */}
+              <div style={{ marginTop: 14, padding: 12, background: 'rgba(250,246,236,0.05)', border: '1px solid rgba(250,246,236,0.12)', borderRadius: 10 }}>
+                <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.55)', marginBottom: 8 }}>
+                  Per Chat anfragen
+                </div>
+                <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.55)', marginBottom: 8, lineHeight: 1.5 }}>
+                  Notfall-Option: Kopiert eine Anfrage in die Zwischenablage. Im Claude-Chat einfügen, JSON-Antwort hier unten reinpacken.
+                </div>
+                <button
+                  onClick={() => {
+                    const q = textInput.trim();
+                    const prompt = `Bitte gib mir die Nährwerte für: **${q}**\n\n` +
+                      `Antworte ausschließlich als JSON-Block in genau diesem Format, ohne weiteren Text:\n` +
+                      `\`\`\`json\n` +
+                      `{ "name": "...", "kcalPer100g": 0, "protein": 0, "carbs": 0, "fat": 0, "units": {"g": 1} }\n` +
+                      `\`\`\`\n\n` +
+                      `Werte pro 100 g. Bei realen Produkten möglichst die Packungsangabe verwenden. ` +
+                      `Bei sinnvollen Einheiten (Stück, Scheibe, EL, TL, Glas, Tasse) das durchschnittliche Gramm-Gewicht in "units" angeben, z.B. {"g":1, "Stück":150, "Scheibe":25}.`;
+                    navigator.clipboard.writeText(prompt).then(() => {
+                      alert('Anfrage kopiert! In einen Claude-Chat einfügen, JSON-Antwort dann unten reinpacken.');
+                      setShowChatImport(true);
+                    }).catch(() => alert(prompt));
+                  }}
+                  style={{
+                    width: '100%', background: 'rgba(144,200,168,0.15)',
+                    border: '1px solid rgba(144,200,168,0.4)', borderRadius: 8,
+                    padding: '10px 12px', cursor: 'pointer',
+                    fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC',
+                  }}
+                >📋 Anfrage kopieren</button>
+
+                {!showChatImport && (
+                  <button
+                    onClick={() => setShowChatImport(true)}
+                    style={{
+                      width: '100%', marginTop: 6, background: 'transparent',
+                      border: '1px dashed rgba(250,246,236,0.2)', borderRadius: 8,
+                      padding: '8px 12px', cursor: 'pointer',
+                      fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.55)',
+                    }}
+                  >Antwort aus Chat einfügen</button>
+                )}
+
+                {showChatImport && (
+                  <div style={{ marginTop: 8 }}>
+                    <textarea
+                      value={chatImportText}
+                      onChange={e => setChatImportText(e.target.value)}
+                      placeholder='Hier den JSON-Block aus dem Chat einfügen...'
+                      rows={5}
+                      style={{
+                        width: '100%', boxSizing: 'border-box',
+                        background: 'rgba(0,0,0,0.25)', color: '#FAF6EC',
+                        border: '1px solid rgba(250,246,236,0.2)', borderRadius: 6,
+                        padding: '8px 10px', fontFamily: 'monospace', fontSize: 11,
+                        outline: 'none', resize: 'vertical',
+                      }}
+                    />
+                    {chatImportText.trim() && (
+                      <div style={{ marginTop: 6 }}>
+                        {chatImportParsed ? (
+                          <div style={{ background: 'rgba(144,200,168,0.1)', border: '1px solid rgba(144,200,168,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 12, color: '#FAF6EC' }}>
+                            <div style={{ fontWeight: 600 }}>{chatImportParsed.name}</div>
+                            <div style={{ fontSize: 11, color: 'rgba(250,246,236,0.75)', marginTop: 2 }}>
+                              {chatImportParsed.kcalPer100g} kcal/100g · E {chatImportParsed.protein}g · K {chatImportParsed.carbs}g · F {chatImportParsed.fat}g
+                            </div>
+                            <div style={{ fontSize: 10, color: 'rgba(250,246,236,0.55)', marginTop: 2 }}>
+                              Einheiten: {Object.entries(chatImportParsed.units).map(([u, v]) => `${u}=${v}g`).join(', ')}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ background: 'rgba(232,168,124,0.1)', border: '1px solid rgba(232,168,124,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 11, color: '#E8A87C' }}>
+                            Kein gültiger Lebensmittel-Eintrag erkannt. Erwartet wird ein JSON-Block mit name, kcalPer100g und Makros.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {chatImportParsed && (
+                      <button
+                        onClick={async () => {
+                          const newItem = {
+                            id: 'g' + crypto.randomUUID().slice(0, 8),
+                            name: chatImportParsed.name,
+                            kcalPer100g: chatImportParsed.kcalPer100g,
+                            protein: chatImportParsed.protein,
+                            carbs: chatImportParsed.carbs,
+                            fat: chatImportParsed.fat,
+                            units: chatImportParsed.units,
+                          };
+                          await persistGlossary([...glossary, newItem]);
+                          // Direkt zur Vorschau hinzufügen
+                          addFromSearch(newItem);
+                          setChatImportText('');
+                          setShowChatImport(false);
+                          setTextInput('');
+                        }}
+                        style={{
+                          width: '100%', marginTop: 8, background: '#1A5340',
+                          border: '1px solid #90C8A8', borderRadius: 8,
+                          padding: '10px 12px', cursor: 'pointer',
+                          fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC',
+                        }}
+                      >Übernehmen & ins Glossar</button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
           {searchResults.length === 0 && !textInput && glossary.length === 0 && (
