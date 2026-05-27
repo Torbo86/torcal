@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.51';
+const APP_VERSION = '3.52';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.52', changes: ['Analyse schätzt fehlende Makros bei grob getrackten Einträgen'] },
   { v: '3.51', changes: ['Mehrtages-Analyse: 3, 7 oder 14 Tage zusammen exportieren'] },
   { v: '3.50', changes: ['Export aufgeräumt: nur noch ein Knopf "Analyse kopieren"'] },
   { v: '3.49', changes: ['Deep-Analyse enthält jetzt den Gewichtsverlauf mit Trend'] },
@@ -1982,6 +1983,8 @@ function App() {
                 `## Mahlzeiten\n${slotLines || 'nichts eingetragen'}\n\n` +
                 (coffeeLines ? `## Getränke\n${coffeeLines}\n` : '') +
                 (actLines ? `## Sport\n${actLines}\n\n` : '') +
+                `## Hinweis zu den Daten\n` +
+                `Manche Einträge wurden nur grob oder ohne Makros getrackt. Wenn bei einem Gericht die Makros (Eiweiß/KH/Fett) fehlen oder unrealistisch niedrig wirken (z.B. 0-1 g bei einer echten Mahlzeit), schätze realistische Werte anhand des Namens und der Kalorien und rechne damit. Weise in der Analyse kurz darauf hin, wo du geschätzt hast.\n\n` +
                 `## Gewünschte Analyse\n` +
                 `1. Bewerte die Makro-Verteilung (Eiweiß besonders wichtig für mein Ziel)\n` +
                 `2. Bewerte die Mahlzeiten-Verteilung über den Tag\n` +
@@ -2247,7 +2250,7 @@ function App() {
                 }
                 weightBlock += '\n';
               }
-              text = `# Torcal Deep-Analyse — ${date}\n\nBitte analysiere meinen Ernährungstag ausführlich als erfahrener Ernährungsberater.\n\n## Persönliche Daten\n${userInfo}\n\n${weightBlock}## Tagesbilanz\n- Gegessen: ${consumed} kcal\n- Verbrannt: ${burned} kcal Sport\n- Netto: ${consumed - burned} kcal von ${dailyTarget} kcal\n- Verbleibend: ${dailyTarget + burned - consumed} kcal\n- Makros: Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n## Mahlzeiten\n${slotLines || 'nichts'}\n\n${coffeeLines ? '## Getränke\n' + coffeeLines + '\n' : ''}${actLines ? '## Sport\n' + actLines + '\n\n' : ''}## Gewünschte Analyse\n1. Makro-Verteilung bewerten\n2. Mahlzeiten-Timing bewerten\n3. Gewichtsverlauf bewerten — auf Kurs?\n4. Was war gut, was besser?\n5. Verbesserungen für morgen\n6. Rezeptideen für Restkalorien`;
+              text = `# Torcal Deep-Analyse — ${date}\n\nBitte analysiere meinen Ernährungstag ausführlich als erfahrener Ernährungsberater.\n\n## Persönliche Daten\n${userInfo}\n\n${weightBlock}## Tagesbilanz\n- Gegessen: ${consumed} kcal\n- Verbrannt: ${burned} kcal Sport\n- Netto: ${consumed - burned} kcal von ${dailyTarget} kcal\n- Verbleibend: ${dailyTarget + burned - consumed} kcal\n- Makros: Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n## Mahlzeiten\n${slotLines || 'nichts'}\n\n${coffeeLines ? '## Getränke\n' + coffeeLines + '\n' : ''}${actLines ? '## Sport\n' + actLines + '\n\n' : ''}## Hinweis zu den Daten\nManche Eintraege wurden nur grob oder ohne Makros getrackt. Wenn Makros fehlen oder unrealistisch niedrig wirken (z.B. 0-1 g bei einer echten Mahlzeit), schaetze realistische Werte aus Name und Kalorien und rechne damit. Weise kurz darauf hin, wo du geschaetzt hast.\n\n## Gewünschte Analyse\n1. Makro-Verteilung bewerten\n2. Mahlzeiten-Timing bewerten\n3. Gewichtsverlauf bewerten — auf Kurs?\n4. Was war gut, was besser?\n5. Verbesserungen für morgen\n6. Rezeptideen für Restkalorien`;
             } else {
               text = `# Torcal Tagesexport — ${date}\n\n**Tagesziel:** ${dailyTarget} kcal\n**Gegessen:** ${consumed} kcal\n**Verbrannt:** ${burned} kcal\n**Netto:** ${consumed - burned} kcal\n**Verbleibend:** ${dailyTarget + burned - consumed} kcal\n\n**Makros:** Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n${coffeeLines}${slotLines}${actLines ? '\n\n' + actLines : ''}`;
             }
@@ -2325,6 +2328,8 @@ function App() {
               `- Netto über Zeitraum: ${totalNet} kcal (Ziel-Summe: ${totalTarget} kcal)\n` +
               `- Bilanz: ${totalNet - totalTarget > 0 ? '+' : ''}${totalNet - totalTarget} kcal gegenüber Ziel\n` +
               weightBlock +
+              `\n## Hinweis zu den Daten\n` +
+              `Manche Tage wurden nur grob getrackt — gerade Wochenenden oder Feiern. Wenn bei Einträgen die Makros fehlen oder unrealistisch niedrig wirken (z.B. fast 0 g Eiweiß an einem Tag mit echten Mahlzeiten), schätze realistische Werte aus den Gerichtenamen und Kalorien und rechne damit. Weise kurz darauf hin, wo geschätzt wurde.\n` +
               `\n## Gewünschte Analyse\n` +
               `1. Gesamtbild des Zeitraums — Defizit gehalten?\n` +
               `2. Welche Tage waren Ausreißer, warum?\n` +
