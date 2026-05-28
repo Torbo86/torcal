@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.56';
+const APP_VERSION = '3.57';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.57', changes: ['Bier & Crémant tracken jetzt auch Makros (Bier ~11g KH/Glas), skalierend'] },
   { v: '3.56', changes: ['Kaffee-Makros zählen jetzt korrekt in Tagessumme und Analyse mit'] },
   { v: '3.55', changes: ['OpenFoodFacts-Suche überarbeitet: bessere Strategien, neue API v2, Relevanz-Ranking', 'DE→EN-Übersetzungen für Eis, Wurst, Schinken, Sahne u.v.m.'] },
   { v: '3.54', changes: ['Notfall-Workflow: Lebensmittel per Claude-Chat anfragen und JSON-Antwort einfügen'] },
@@ -1961,19 +1962,28 @@ function App() {
             const newLog = { ...alcoholLog, [date]: newDay };
             await persistAlcoholLog(newLog);
             // Alkohol als kcal-Eintrag buchen
+            const count = prev + 1;
             const kcal = type === 'beer' ? beerKcal : cremantKcal;
-            const name = type === 'beer' ? `Bier ×${prev + 1}` : `Crémant ×${prev + 1}`;
+            const name = type === 'beer' ? `Bier ×${count}` : `Crémant ×${count}`;
+            // Makros pro Einheit: Bier (0,33l) ~11g KH, ~1,5g Eiweiß; Crémant (0,1l) ~1,5g KH
+            const perKH = type === 'beer' ? 11 : 1.5;
+            const perP = type === 'beer' ? 1.5 : 0.2;
+            const macros = {
+              protein: Math.round(perP * count * 10) / 10,
+              carbs: Math.round(perKH * count * 10) / 10,
+              fat: 0,
+            };
             const existing = entries.find(e => e.dateKey === date && e.isAlcohol && e.alcoholType === type);
             if (existing) {
               await persistEntries(entries.map(e => e.id === existing.id
-                ? { ...e, qty: prev + 1, kcal: (prev + 1) * kcal, foodName: name }
+                ? { ...e, qty: count, kcal: count * kcal, ...macros, foodName: name }
                 : e));
             } else {
               await persistEntries([...entries, {
                 id: crypto.randomUUID(), dateKey: date, time: new Date().toISOString(),
                 foodId: `alcohol-${type}`, foodName: name,
-                qty: 1, unit: type === 'beer' ? '× 330ml' : '× 200ml',
-                kcal, protein: 0, carbs: type === 'beer' ? 13 : 4, fat: 0,
+                qty: 1, unit: type === 'beer' ? '× 330ml' : '× 100ml',
+                kcal, ...macros,
                 slot: 'Snack', isAlcohol: true, alcoholType: type,
               }]);
             }
@@ -1991,9 +2001,14 @@ function App() {
             if (prev - 1 === 0) {
               await persistEntries(entries.filter(e => e.id !== existing.id));
             } else {
-              const newName = type === 'beer' ? `Bier ×${prev - 1}` : `Crémant ×${prev - 1}`;
+              const count = prev - 1;
+              const newName = type === 'beer' ? `Bier ×${count}` : `Crémant ×${count}`;
+              const perKH = type === 'beer' ? 11 : 1.5;
+              const perP = type === 'beer' ? 1.5 : 0.2;
               await persistEntries(entries.map(e => e.id === existing.id
-                ? { ...e, qty: prev - 1, kcal: (prev - 1) * kcal, foodName: newName }
+                ? { ...e, qty: count, kcal: count * kcal, foodName: newName,
+                    protein: Math.round(perP * count * 10) / 10,
+                    carbs: Math.round(perKH * count * 10) / 10, fat: 0 }
                 : e));
             }
           }}
@@ -2010,9 +2025,9 @@ function App() {
             const dayActs = activityEntries.filter(a => a.dateKey === date);
             const consumed = allDayEntries.reduce((s, e) => s + e.kcal, 0); // alle inkl. Kaffee
             const burned = dayActs.reduce((s, a) => s + a.kcal, 0);
-            const protein = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.protein || 0), 0);
-            const carbs = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.carbs || 0), 0);
-            const fat = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.fat || 0), 0);
+            const protein = allDayEntries.reduce((s, e) => s + (e.protein || 0), 0);
+            const carbs = allDayEntries.reduce((s, e) => s + (e.carbs || 0), 0);
+            const fat = allDayEntries.reduce((s, e) => s + (e.fat || 0), 0);
             const slots = ['Frühstück', 'Mittag', 'Snack', 'Abend'];
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
@@ -2300,9 +2315,9 @@ function App() {
             const dayActs = activityEntries.filter(a => a.dateKey === date);
             const consumed = allDayEntries.reduce((s, e) => s + e.kcal, 0);
             const burned = dayActs.reduce((s, a) => s + a.kcal, 0);
-            const protein = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.protein || 0), 0);
-            const carbs = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.carbs || 0), 0);
-            const fat = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.fat || 0), 0);
+            const protein = allDayEntries.reduce((s, e) => s + (e.protein || 0), 0);
+            const carbs = allDayEntries.reduce((s, e) => s + (e.carbs || 0), 0);
+            const fat = allDayEntries.reduce((s, e) => s + (e.fat || 0), 0);
             const slots = ['Frühstück', 'Mittag', 'Snack', 'Abend'];
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
@@ -3074,8 +3089,8 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
   const pct = Math.min(100, (consumed / target) * 100); // Balken = gegessen (brutto)
   const over = consumed > target + burned; // überschritten = gegessen > ziel + sport
 
-  // Makro-Summen (Alkohol ausschließen; Kaffee-Milch-Makros zählen mit)
-  const totals = entries.filter(e => !e.isAlcohol).reduce((acc, e) => ({
+  // Makro-Summen — Kaffee-Milch und Alkohol-KH (Bier) zählen mit
+  const totals = entries.reduce((acc, e) => ({
     protein: acc.protein + (e.protein || 0),
     carbs: acc.carbs + (e.carbs || 0),
     fat: acc.fat + (e.fat || 0),
