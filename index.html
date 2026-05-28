@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.55';
+const APP_VERSION = '3.56';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.56', changes: ['Kaffee-Makros zählen jetzt korrekt in Tagessumme und Analyse mit'] },
   { v: '3.55', changes: ['OpenFoodFacts-Suche überarbeitet: bessere Strategien, neue API v2, Relevanz-Ranking', 'DE→EN-Übersetzungen für Eis, Wurst, Schinken, Sahne u.v.m.'] },
   { v: '3.54', changes: ['Notfall-Workflow: Lebensmittel per Claude-Chat anfragen und JSON-Antwort einfügen'] },
   { v: '3.53', changes: ['Kaffee-Kachel: Milch-Makros korrekt hinterlegt und skalierend'] },
@@ -903,10 +904,14 @@ const lookupOpenFoodFactsMany = async (name, pageSize = 15) => {
   const seen = new Set();
 
   const fetchTerm = async (term) => {
-    // Versuche zuerst die neue API v2, dann fallback auf cgi/search.pl
+    // Versuche zuerst die neue API v2 (mit DE-Sprache und DE-Ländervorzug), dann fallback
     const urls = [
-      `https://world.openfoodfacts.org/api/v2/search?search_terms=${encodeURIComponent(term)}&page_size=${pageSize}&fields=product_name,product_name_de,brands,nutriments`,
-      `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=${pageSize}`,
+      // v2 mit deutscher Sprache und Deutschland als Land
+      `https://world.openfoodfacts.org/api/v2/search?search_terms=${encodeURIComponent(term)}&countries_tags_en=germany&page_size=${pageSize}&fields=product_name,product_name_de,brands,countries_tags,nutriments&lc=de`,
+      // v2 ohne Länderfilter
+      `https://world.openfoodfacts.org/api/v2/search?search_terms=${encodeURIComponent(term)}&page_size=${pageSize}&fields=product_name,product_name_de,brands,countries_tags,nutriments&lc=de`,
+      // Alte API als letzter Fallback
+      `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=${pageSize}&lc=de`,
     ];
     for (const url of urls) {
       try {
@@ -922,32 +927,51 @@ const lookupOpenFoodFactsMany = async (name, pageSize = 15) => {
           if (!kcal || kcal < 1 || kcal > 950) continue;
           const pname = p.product_name_de || p.product_name;
           if (!pname || pname.trim().length < 2) continue;
+
+          // STRENGER RELEVANZ-FILTER: mindestens eines der Such-Wörter
+          // muss im Produktnamen ODER in den Marken vorkommen
+          const nLow = pname.toLowerCase();
+          const brandLow = (p.brands || '').toLowerCase();
+          const hasMatch = words.some(w => nLow.includes(w) || brandLow.includes(w));
+          if (!hasMatch && words.length > 0) {
+            // Wenn englischer Suchbegriff verwendet wurde, dort auch suchen
+            const enWords = words.map(w => DE_EN[w]).filter(Boolean);
+            const hasEnMatch = enWords.some(w => nLow.includes(w));
+            if (!hasEnMatch) continue;
+          }
+
           const key = pname.toLowerCase().slice(0, 30) + '|' + (p.brands || '').slice(0, 10);
           if (seen.has(key)) continue;
           seen.add(key);
+
+          // Land aus countries_tags ermitteln (z.B. "en:germany")
+          const isGerman = (p.countries_tags || []).some(c => c === 'en:germany' || c.endsWith(':germany'));
+
           results.push({
             source: 'OpenFoodFacts', name: pname.trim(),
             brand: p.brands || null,
+            isGerman,
             kcalPer100g: Math.round(kcal),
             protein: n.proteins_100g != null ? Math.round(n.proteins_100g * 10) / 10 : 0,
             carbs: n.carbohydrates_100g != null ? Math.round(n.carbohydrates_100g * 10) / 10 : 0,
             fat: n.fat_100g != null ? Math.round(n.fat_100g * 10) / 10 : 0,
           });
         }
-        return; // erste erfolgreiche URL reicht
+        if (results.length > 0) return; // erste URL mit Treffern reicht
       } catch {}
     }
   };
 
   await Promise.all([...searchTerms].slice(0, 4).map(fetchTerm));
 
-  // Relevanz-Ranking: Wie viele Suchwörter sind im Treffer-Namen enthalten?
+  // Relevanz-Ranking: deutsche Produkte zuerst, dann nach Suchwort-Match
   const scored = results.map(r => {
     const nLow = r.name.toLowerCase();
     const matchedWords = words.filter(w => nLow.includes(w)).length;
     const startsWith = words.length > 0 && nLow.startsWith(words[0]) ? 1 : 0;
+    const germanBonus = r.isGerman ? 2 : 0;
     const hasBrand = r.brand ? 0.3 : 0;
-    return { r, score: matchedWords + startsWith + hasBrand };
+    return { r, score: matchedWords + startsWith + germanBonus + hasBrand };
   });
   scored.sort((a, b) => b.score - a.score);
   return scored.map(s => s.r).slice(0, pageSize);
@@ -1986,9 +2010,9 @@ function App() {
             const dayActs = activityEntries.filter(a => a.dateKey === date);
             const consumed = allDayEntries.reduce((s, e) => s + e.kcal, 0); // alle inkl. Kaffee
             const burned = dayActs.reduce((s, a) => s + a.kcal, 0);
-            const protein = dayEntries.reduce((s, e) => s + (e.protein || 0), 0);
-            const carbs = dayEntries.reduce((s, e) => s + (e.carbs || 0), 0);
-            const fat = dayEntries.reduce((s, e) => s + (e.fat || 0), 0);
+            const protein = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.protein || 0), 0);
+            const carbs = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.carbs || 0), 0);
+            const fat = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.fat || 0), 0);
             const slots = ['Frühstück', 'Mittag', 'Snack', 'Abend'];
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
@@ -2276,9 +2300,9 @@ function App() {
             const dayActs = activityEntries.filter(a => a.dateKey === date);
             const consumed = allDayEntries.reduce((s, e) => s + e.kcal, 0);
             const burned = dayActs.reduce((s, a) => s + a.kcal, 0);
-            const protein = dayEntries.reduce((s, e) => s + (e.protein || 0), 0);
-            const carbs = dayEntries.reduce((s, e) => s + (e.carbs || 0), 0);
-            const fat = dayEntries.reduce((s, e) => s + (e.fat || 0), 0);
+            const protein = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.protein || 0), 0);
+            const carbs = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.carbs || 0), 0);
+            const fat = allDayEntries.filter(e => !e.isAlcohol).reduce((s, e) => s + (e.fat || 0), 0);
             const slots = ['Frühstück', 'Mittag', 'Snack', 'Abend'];
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
@@ -3050,8 +3074,8 @@ function Today({ target, consumed, burned, remaining, entries, activities, activ
   const pct = Math.min(100, (consumed / target) * 100); // Balken = gegessen (brutto)
   const over = consumed > target + burned; // überschritten = gegessen > ziel + sport
 
-  // Makro-Summen (Kaffee-Einträge ausschließen)
-  const totals = entries.filter(e => !e.isCoffee && !e.isAlcohol).reduce((acc, e) => ({
+  // Makro-Summen (Alkohol ausschließen; Kaffee-Milch-Makros zählen mit)
+  const totals = entries.filter(e => !e.isAlcohol).reduce((acc, e) => ({
     protein: acc.protein + (e.protein || 0),
     carbs: acc.carbs + (e.carbs || 0),
     fat: acc.fat + (e.fat || 0),
