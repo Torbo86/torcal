@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.61';
+const APP_VERSION = '3.62';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.62', changes: ['Export & Teilen wieder funktionsfähig (fehlender Parameter behoben)'] },
   { v: '3.61', changes: ['Export robuster: Fallback auf Teilen oder neuen Tab, falls Download blockiert wird'] },
   { v: '3.60', changes: ['Fortschrittsfotos: in Auswertung Fotos im Verlauf festhalten, automatisch verkleinert'] },
   { v: '3.59', changes: ['Backup teilen: per Teilen-Menü direkt in OneDrive, Drive, Mail usw. sichern'] },
@@ -2619,6 +2620,7 @@ function App() {
           glossary={glossary}
           dishes={dishes}
           weights={weights}
+          progressPhotos={progressPhotos}
           currentWeight={currentWeight}
           activities={activities}
           workouts={workouts}
@@ -7689,7 +7691,7 @@ function ApiStatus({ apiKey }) {
 }
 
 // === Settings ===
-function SettingsView({ settings, entries, glossary, dishes = [], weights = [], currentWeight = 0, activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, beerKcal = 145, onBeerKcalChange, cremantKcal = 170, onCremantKcalChange, coffeeKcal = 40, onCoffeeKcalChange, alcoholLog = {}, intimacyLog = [], apiKey = '', onApiKeyChange, onSave, onBack, onImport, onLoadRecipes }) {
+function SettingsView({ settings, entries, glossary, dishes = [], weights = [], progressPhotos = [], currentWeight = 0, activities = [], workouts = [], activityEntries = [], notes = '', onNotesChange, savedAnalyses = [], waterGoal = 8, onWaterGoalChange, beerKcal = 145, onBeerKcalChange, cremantKcal = 170, onCremantKcalChange, coffeeKcal = 40, onCoffeeKcalChange, alcoholLog = {}, intimacyLog = [], apiKey = '', onApiKeyChange, onSave, onBack, onImport, onLoadRecipes }) {
   const [s, setS] = useState(settings);
   const [keyInput, setKeyInput] = useState(apiKey);
   const [keyVisible, setKeyVisible] = useState(false);
