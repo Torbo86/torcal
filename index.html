@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.65';
+const APP_VERSION = '3.66';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.66', changes: ['KI-Knopf jetzt auch im Glossar-Editor: Name eintippen, ✨, alle Felder gefüllt'] },
   { v: '3.65', changes: ['KI-Suche: unbekannte Lebensmittel direkt per Tap ergänzen (Name, kcal, Makros auf einmal)'] },
   { v: '3.64', changes: ['Teilen-Knopf ehrlicher beschriftet: macht jetzt erst Teilen oder fällt auf Download zurück'] },
   { v: '3.63', changes: ['Teilen fällt bei Permission-Fehler automatisch auf Download zurück, statt nur zu meckern'] },
@@ -6380,6 +6381,8 @@ function FoodEditor({ food, onSave, onDelete, onCancel, apiKey = '' }) {
   const [lookupQuery, setLookupQuery] = useState('');
   const [lookupResults, setLookupResults] = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
+  const [kiFillLoading, setKiFillLoading] = useState(false);
+  const [kiFillError, setKiFillError] = useState('');
   const [showCamera, setShowCamera] = useState(false);
   const [cropImageUrl, setCropImageUrl] = useState(null);
   const [photoAnalyzing, setPhotoAnalyzing] = useState(false);
@@ -6470,6 +6473,58 @@ function FoodEditor({ food, onSave, onDelete, onCancel, apiKey = '' }) {
 
         {/* Werte aus dem Netz holen */}
         <div style={{ background: 'rgba(250,246,236,0.06)', padding: 12, borderRadius: 8, marginBottom: 12 }}>
+          {/* HAUPTWEG: KI ergänzt alle Felder auf einen Tap (nur wenn API-Key) */}
+          {apiKey && (
+            <div style={{ marginBottom: 12 }}>
+              <button
+                disabled={kiFillLoading || !(f.name || lookupQuery).trim()}
+                onClick={async () => {
+                  const query = (f.name || lookupQuery).trim();
+                  if (!query) return;
+                  setKiFillError('');
+                  setKiFillLoading(true);
+                  try {
+                    const food = await estimateFullFoodFromName(query, apiKey);
+                    setF({
+                      ...f,
+                      name: food.name,
+                      kcalPer100g: food.kcalPer100g,
+                      protein: food.protein,
+                      carbs: food.carbs,
+                      fat: food.fat,
+                      units: food.units,
+                    });
+                  } catch (err) {
+                    setKiFillError(err.message || 'Fehler bei der KI-Anfrage');
+                  } finally {
+                    setKiFillLoading(false);
+                  }
+                }}
+                style={{
+                  width: '100%', background: '#1A5340',
+                  border: '1px solid #90C8A8', borderRadius: 8,
+                  padding: '12px', cursor: kiFillLoading ? 'wait' : 'pointer',
+                  fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC',
+                  opacity: (kiFillLoading || !(f.name || lookupQuery).trim()) ? 0.5 : 1,
+                }}
+              >
+                {kiFillLoading ? '… KI sucht …' : `✨ Per KI ergänzen${(f.name || lookupQuery).trim() ? `: "${(f.name || lookupQuery).trim()}"` : ''}`}
+              </button>
+              <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.5)', marginTop: 4, lineHeight: 1.4 }}>
+                Füllt Name, Kalorien, Makros und Einheiten automatisch. Werte kannst du danach noch bearbeiten.
+              </div>
+              {kiFillError && (
+                <div style={{ background: 'rgba(232,168,124,0.1)', border: '1px solid rgba(232,168,124,0.3)', borderRadius: 6, padding: 8, marginTop: 6, fontFamily: 'Inter', fontSize: 11, color: '#E8A87C' }}>
+                  {kiFillError}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* OFF-Suche als zweite Option für Markenprodukte */}
+          <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.5)', marginBottom: 6 }}>
+            Oder Markenprodukt online suchen
+          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               placeholder={f.name ? `Suche „${f.name}"` : 'Was möchtest du suchen?'}
