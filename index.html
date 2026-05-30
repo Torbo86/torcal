@@ -131,11 +131,14 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.62';
+const APP_VERSION = '3.65';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.65', changes: ['KI-Suche: unbekannte Lebensmittel direkt per Tap ergänzen (Name, kcal, Makros auf einmal)'] },
+  { v: '3.64', changes: ['Teilen-Knopf ehrlicher beschriftet: macht jetzt erst Teilen oder fällt auf Download zurück'] },
+  { v: '3.63', changes: ['Teilen fällt bei Permission-Fehler automatisch auf Download zurück, statt nur zu meckern'] },
   { v: '3.62', changes: ['Export & Teilen wieder funktionsfähig (fehlender Parameter behoben)'] },
   { v: '3.61', changes: ['Export robuster: Fallback auf Teilen oder neuen Tab, falls Download blockiert wird'] },
   { v: '3.60', changes: ['Fortschrittsfotos: in Auswertung Fotos im Verlauf festhalten, automatisch verkleinert'] },
@@ -887,6 +890,51 @@ const DE_EN = {
   // Getränke
   'wasser':'water','saft':'juice','apfelsaft':'apple juice','orangensaft':'orange juice',
   'bier':'beer','wein':'wine','kaffee':'coffee','tee':'tea','cola':'cola','limonade':'lemonade',
+};
+
+// Komplettes Lebensmittel per KI ergänzen — nur Name -> alles inkl. kcal & Einheiten
+const estimateFullFoodFromName = async (name, apiKey) => {
+  if (!apiKey) throw new Error('Kein API-Key');
+  const prompt = `Bitte gib mir die Nährwerte für: "${name}"
+
+Antworte AUSSCHLIESSLICH als JSON-Block in genau diesem Format, ohne weiteren Text:
+{ "name": "...", "kcalPer100g": 0, "protein": 0, "carbs": 0, "fat": 0, "units": {"g": 1} }
+
+Werte pro 100 g. Bei realen Produkten möglichst die Packungsangabe verwenden.
+Bei sinnvollen Einheiten (Stück, Scheibe, EL, TL, Glas, Tasse, Tasse, Portion) das durchschnittliche Gramm-Gewicht in "units" angeben.
+Beispiele:
+- Banane: { "name": "Banane", "kcalPer100g": 93, "protein": 1.1, "carbs": 21, "fat": 0.3, "units": {"g":1, "Stück":120} }
+- Rührei: { "name": "Rührei", "kcalPer100g": 155, "protein": 11, "carbs": 1, "fat": 12, "units": {"g":1, "Portion":120} }`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 300,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error('API-Fehler');
+  const data = await res.json();
+  const text = data?.content?.[0]?.text || '';
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Keine Antwort');
+  const obj = JSON.parse(match[0]);
+  if (!obj.name || typeof obj.kcalPer100g !== 'number') throw new Error('Ungültige Antwort');
+  return {
+    name: String(obj.name).trim(),
+    kcalPer100g: +obj.kcalPer100g,
+    protein: +(obj.protein || 0),
+    carbs: +(obj.carbs || 0),
+    fat: +(obj.fat || 0),
+    units: obj.units && typeof obj.units === 'object' ? obj.units : { g: 1 },
+  };
 };
 
 // Makros eines Gerichts per KI schätzen — Name + kcal -> Eiweiß/KH/Fett
@@ -4479,6 +4527,8 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
   // Chat-Import: Eingabefeld für JSON-Antwort + Vorschau
   const [chatImportText, setChatImportText] = useState('');
   const [showChatImport, setShowChatImport] = useState(false);
+  const [kiSearching, setKiSearching] = useState(false);
+  const [kiSearchError, setKiSearchError] = useState('');
   const [parsed, setParsed] = useState([]);
   const [slot, setSlot] = useState(initialSlot || guessMealSlot());
   // Datum: wenn initialDate gesetzt (z.B. zukünftiger Tag), dieses verwenden
@@ -5054,117 +5104,145 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
               <div style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.6)', marginBottom: 6 }}>
                 Nichts im Glossar gefunden
               </div>
+
+              {/* HAUPTWEG: KI-Suche (wenn API-Key da) */}
+              {apiKey && (
+                <div style={{ marginBottom: 10 }}>
+                  <button
+                    disabled={kiSearching}
+                    onClick={async () => {
+                      setKiSearchError('');
+                      setKiSearching(true);
+                      try {
+                        const food = await estimateFullFoodFromName(textInput.trim(), apiKey);
+                        const newItem = {
+                          id: 'g' + crypto.randomUUID().slice(0, 8),
+                          name: food.name,
+                          kcalPer100g: food.kcalPer100g,
+                          protein: food.protein,
+                          carbs: food.carbs,
+                          fat: food.fat,
+                          units: food.units,
+                        };
+                        await persistGlossary([...glossary, newItem]);
+                        addFromSearch(newItem);
+                        setTextInput('');
+                      } catch (err) {
+                        setKiSearchError(err.message || 'Fehler bei der KI-Anfrage');
+                      } finally {
+                        setKiSearching(false);
+                      }
+                    }}
+                    style={{
+                      width: '100%', background: '#1A5340',
+                      border: '1px solid #90C8A8', borderRadius: 10,
+                      padding: '14px 14px', cursor: kiSearching ? 'wait' : 'pointer',
+                      fontFamily: 'Inter', fontSize: 14, fontWeight: 600, color: '#FAF6EC',
+                      opacity: kiSearching ? 0.6 : 1,
+                    }}
+                  >
+                    {kiSearching ? '… KI sucht …' : `✨ Per KI ergänzen: "${textInput}"`}
+                  </button>
+                  <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.5)', marginTop: 4, lineHeight: 1.4 }}>
+                    KI ergänzt Kalorien & Makros, legt das Lebensmittel ins Glossar und trägt es ein. Kostet Bruchteile eines Cents.
+                  </div>
+                  {kiSearchError && (
+                    <div style={{ background: 'rgba(232,168,124,0.1)', border: '1px solid rgba(232,168,124,0.3)', borderRadius: 6, padding: 8, marginTop: 6, fontFamily: 'Inter', fontSize: 11, color: '#E8A87C' }}>
+                      {kiSearchError}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!apiKey && (
+                <div style={{ background: 'rgba(232,168,124,0.08)', border: '1px solid rgba(232,168,124,0.2)', borderRadius: 8, padding: 10, marginBottom: 10, fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.7)', lineHeight: 1.5 }}>
+                  Tipp: Mit hinterlegtem API-Key (Einstellungen → Daten) kann die KI fehlende Lebensmittel direkt ergänzen.
+                </div>
+              )}
+
+              {/* Weitere Optionen */}
               <button style={styles.secondary} onClick={handleTextSubmit}>
-                Als Satz parsen
+                Als Satz parsen (z.B. "300g Quark")
               </button>
 
-              {/* Chat-Workflow: Lebensmittel per Claude-Chat anfragen */}
-              <div style={{ marginTop: 14, padding: 12, background: 'rgba(250,246,236,0.05)', border: '1px solid rgba(250,246,236,0.12)', borderRadius: 10 }}>
-                <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.55)', marginBottom: 8 }}>
-                  Per Chat anfragen
-                </div>
-                <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.55)', marginBottom: 8, lineHeight: 1.5 }}>
-                  Notfall-Option: Kopiert eine Anfrage in die Zwischenablage. Im Claude-Chat einfügen, JSON-Antwort hier unten reinpacken.
-                </div>
-                <button
-                  onClick={() => {
-                    const q = textInput.trim();
-                    const prompt = `Bitte gib mir die Nährwerte für: **${q}**\n\n` +
-                      `Antworte ausschließlich als JSON-Block in genau diesem Format, ohne weiteren Text:\n` +
-                      `\`\`\`json\n` +
-                      `{ "name": "...", "kcalPer100g": 0, "protein": 0, "carbs": 0, "fat": 0, "units": {"g": 1} }\n` +
-                      `\`\`\`\n\n` +
-                      `Werte pro 100 g. Bei realen Produkten möglichst die Packungsangabe verwenden. ` +
-                      `Bei sinnvollen Einheiten (Stück, Scheibe, EL, TL, Glas, Tasse) das durchschnittliche Gramm-Gewicht in "units" angeben, z.B. {"g":1, "Stück":150, "Scheibe":25}.`;
-                    navigator.clipboard.writeText(prompt).then(() => {
-                      alert('Anfrage kopiert! In einen Claude-Chat einfügen, JSON-Antwort dann unten reinpacken.');
-                      setShowChatImport(true);
-                    }).catch(() => alert(prompt));
-                  }}
-                  style={{
-                    width: '100%', background: 'rgba(144,200,168,0.15)',
-                    border: '1px solid rgba(144,200,168,0.4)', borderRadius: 8,
-                    padding: '10px 12px', cursor: 'pointer',
-                    fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC',
-                  }}
-                >📋 Anfrage kopieren</button>
-
-                {!showChatImport && (
-                  <button
-                    onClick={() => setShowChatImport(true)}
-                    style={{
-                      width: '100%', marginTop: 6, background: 'transparent',
-                      border: '1px dashed rgba(250,246,236,0.2)', borderRadius: 8,
-                      padding: '8px 12px', cursor: 'pointer',
-                      fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.55)',
-                    }}
-                  >Antwort aus Chat einfügen</button>
-                )}
-
-                {showChatImport && (
-                  <div style={{ marginTop: 8 }}>
-                    <textarea
-                      value={chatImportText}
-                      onChange={e => setChatImportText(e.target.value)}
-                      placeholder='Hier den JSON-Block aus dem Chat einfügen...'
-                      rows={5}
-                      style={{
-                        width: '100%', boxSizing: 'border-box',
-                        background: 'rgba(0,0,0,0.25)', color: '#FAF6EC',
-                        border: '1px solid rgba(250,246,236,0.2)', borderRadius: 6,
-                        padding: '8px 10px', fontFamily: 'monospace', fontSize: 11,
-                        outline: 'none', resize: 'vertical',
-                      }}
-                    />
-                    {chatImportText.trim() && (
-                      <div style={{ marginTop: 6 }}>
-                        {chatImportParsed ? (
-                          <div style={{ background: 'rgba(144,200,168,0.1)', border: '1px solid rgba(144,200,168,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 12, color: '#FAF6EC' }}>
-                            <div style={{ fontWeight: 600 }}>{chatImportParsed.name}</div>
-                            <div style={{ fontSize: 11, color: 'rgba(250,246,236,0.75)', marginTop: 2 }}>
-                              {chatImportParsed.kcalPer100g} kcal/100g · E {chatImportParsed.protein}g · K {chatImportParsed.carbs}g · F {chatImportParsed.fat}g
-                            </div>
-                            <div style={{ fontSize: 10, color: 'rgba(250,246,236,0.55)', marginTop: 2 }}>
-                              Einheiten: {Object.entries(chatImportParsed.units).map(([u, v]) => `${u}=${v}g`).join(', ')}
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ background: 'rgba(232,168,124,0.1)', border: '1px solid rgba(232,168,124,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 11, color: '#E8A87C' }}>
-                            Kein gültiger Lebensmittel-Eintrag erkannt. Erwartet wird ein JSON-Block mit name, kcalPer100g und Makros.
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {chatImportParsed && (
-                      <button
-                        onClick={async () => {
-                          const newItem = {
-                            id: 'g' + crypto.randomUUID().slice(0, 8),
-                            name: chatImportParsed.name,
-                            kcalPer100g: chatImportParsed.kcalPer100g,
-                            protein: chatImportParsed.protein,
-                            carbs: chatImportParsed.carbs,
-                            fat: chatImportParsed.fat,
-                            units: chatImportParsed.units,
-                          };
-                          await persistGlossary([...glossary, newItem]);
-                          // Direkt zur Vorschau hinzufügen
-                          addFromSearch(newItem);
-                          setChatImportText('');
-                          setShowChatImport(false);
-                          setTextInput('');
-                        }}
-                        style={{
-                          width: '100%', marginTop: 8, background: '#1A5340',
-                          border: '1px solid #90C8A8', borderRadius: 8,
-                          padding: '10px 12px', cursor: 'pointer',
-                          fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC',
-                        }}
-                      >Übernehmen & ins Glossar</button>
-                    )}
+              {/* Chat-Workflow als Fallback ohne API-Key */}
+              {!apiKey && (
+                <div style={{ marginTop: 14, padding: 12, background: 'rgba(250,246,236,0.05)', border: '1px solid rgba(250,246,236,0.12)', borderRadius: 10 }}>
+                  <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.55)', marginBottom: 8 }}>
+                    Per Chat anfragen
                   </div>
-                )}
-              </div>
+                  <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.55)', marginBottom: 8, lineHeight: 1.5 }}>
+                    Ohne API-Key: Kopiere eine Anfrage in die Zwischenablage, frag in einem Claude-Chat, füg die JSON-Antwort hier unten ein.
+                  </div>
+                  <button
+                    onClick={() => {
+                      const q = textInput.trim();
+                      const prompt = `Bitte gib mir die Nährwerte für: **${q}**\n\nAntworte ausschließlich als JSON-Block in genau diesem Format, ohne weiteren Text:\n\`\`\`json\n{ "name": "...", "kcalPer100g": 0, "protein": 0, "carbs": 0, "fat": 0, "units": {"g": 1} }\n\`\`\`\n\nWerte pro 100 g. Bei realen Produkten möglichst die Packungsangabe verwenden. Bei sinnvollen Einheiten (Stück, Scheibe, EL, TL, Glas, Tasse) das durchschnittliche Gramm-Gewicht in "units" angeben.`;
+                      navigator.clipboard.writeText(prompt).then(() => {
+                        alert('Anfrage kopiert! In einen Claude-Chat einfügen.');
+                        setShowChatImport(true);
+                      }).catch(() => alert(prompt));
+                    }}
+                    style={{ width: '100%', background: 'rgba(144,200,168,0.15)', border: '1px solid rgba(144,200,168,0.4)', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC' }}
+                  >📋 Anfrage kopieren</button>
+
+                  {!showChatImport && (
+                    <button
+                      onClick={() => setShowChatImport(true)}
+                      style={{ width: '100%', marginTop: 6, background: 'transparent', border: '1px dashed rgba(250,246,236,0.2)', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.55)' }}
+                    >Antwort aus Chat einfügen</button>
+                  )}
+
+                  {showChatImport && (
+                    <div style={{ marginTop: 8 }}>
+                      <textarea
+                        value={chatImportText}
+                        onChange={e => setChatImportText(e.target.value)}
+                        placeholder='Hier den JSON-Block aus dem Chat einfügen...'
+                        rows={5}
+                        style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(0,0,0,0.25)', color: '#FAF6EC', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 6, padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, outline: 'none', resize: 'vertical' }}
+                      />
+                      {chatImportText.trim() && (
+                        <div style={{ marginTop: 6 }}>
+                          {chatImportParsed ? (
+                            <div style={{ background: 'rgba(144,200,168,0.1)', border: '1px solid rgba(144,200,168,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 12, color: '#FAF6EC' }}>
+                              <div style={{ fontWeight: 600 }}>{chatImportParsed.name}</div>
+                              <div style={{ fontSize: 11, color: 'rgba(250,246,236,0.75)', marginTop: 2 }}>
+                                {chatImportParsed.kcalPer100g} kcal/100g · E {chatImportParsed.protein}g · K {chatImportParsed.carbs}g · F {chatImportParsed.fat}g
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ background: 'rgba(232,168,124,0.1)', border: '1px solid rgba(232,168,124,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 11, color: '#E8A87C' }}>
+                              Kein gültiger Lebensmittel-Eintrag erkannt.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {chatImportParsed && (
+                        <button
+                          onClick={async () => {
+                            const newItem = {
+                              id: 'g' + crypto.randomUUID().slice(0, 8),
+                              name: chatImportParsed.name,
+                              kcalPer100g: chatImportParsed.kcalPer100g,
+                              protein: chatImportParsed.protein,
+                              carbs: chatImportParsed.carbs,
+                              fat: chatImportParsed.fat,
+                              units: chatImportParsed.units,
+                            };
+                            await persistGlossary([...glossary, newItem]);
+                            addFromSearch(newItem);
+                            setChatImportText('');
+                            setShowChatImport(false);
+                            setTextInput('');
+                          }}
+                          style={{ width: '100%', marginTop: 8, background: '#1A5340', border: '1px solid #90C8A8', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC' }}
+                        >Übernehmen & ins Glossar</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {searchResults.length === 0 && !textInput && glossary.length === 0 && (
@@ -7739,30 +7817,39 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
   const shareData = async () => {
     const json = JSON.stringify({ settings: s, entries, glossary, dishes, weights, progressPhotos, activities, workouts, activityEntries, notes, savedAnalyses, alcoholLog, intimacyLog, exportedAt: new Date().toISOString() }, null, 2);
     const filename = `torcal-${todayKey()}.json`;
+
+    const fallbackDownload = () => {
+      try {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return true;
+      } catch { return false; }
+    };
+
     try {
-      // Versuche, eine echte Datei zu teilen (funktioniert auf Mobile)
       const file = new File([json], filename, { type: 'application/json' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
           title: 'Torcal Backup',
-          text: `Backup vom ${new Date().toLocaleDateString('de-DE')}`,
         });
         return;
       }
-      // Fallback: Text teilen (klappt zumindest mit kleinen Backups)
-      if (navigator.share) {
-        await navigator.share({ title: filename, text: json });
+      // Falls Share-API für Files nicht unterstützt → Download
+      if (fallbackDownload()) return;
+    } catch (err) {
+      // User-Abbruch ist okay, sonst Fallback versuchen
+      if (err && err.name === 'AbortError') return;
+      // Bei "NotAllowedError" (permission denied) oder anderem Fehler: stiller Fallback auf Download
+      if (fallbackDownload()) {
+        alert('Teilen nicht möglich — Datei wurde stattdessen heruntergeladen.');
         return;
       }
-      // Letzter Fallback: ganz normaler Download
-      alert('Teilen wird nicht unterstützt — Datei wird stattdessen heruntergeladen.');
-      exportData();
-    } catch (err) {
-      // Abbruch durch User ist okay, andere Fehler melden
-      if (err && err.name !== 'AbortError') {
-        alert('Teilen fehlgeschlagen: ' + err.message);
-      }
+      alert('Teilen und Download fehlgeschlagen: ' + (err.message || 'unbekannt'));
     }
   };
 
@@ -8154,9 +8241,10 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
         <button
           style={{ ...styles.secondary, marginTop: 8 }}
           onClick={shareData}
-        >📤 Backup teilen (z.B. OneDrive, Drive)</button>
+        >📤 Backup sichern (Teilen oder Download)</button>
         <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.5)', marginTop: 6, lineHeight: 1.5 }}>
-          Öffnet das Teilen-Menü deines Geräts. Praktisch um regelmäßig in der Cloud zu sichern.
+          Versucht erst das System-Teilen-Menü (z.B. nach OneDrive). Falls dein Browser das blockiert,
+          wird die Datei ganz normal heruntergeladen — du kannst sie dann manuell aus dem Downloads-Ordner teilen.
         </div>
         <label style={{ ...styles.secondary, display: 'block', textAlign: 'center', marginTop: 8, cursor: 'pointer' }}>
           📥 Import
