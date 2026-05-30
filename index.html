@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.60';
+const APP_VERSION = '3.61';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.61', changes: ['Export robuster: Fallback auf Teilen oder neuen Tab, falls Download blockiert wird'] },
   { v: '3.60', changes: ['Fortschrittsfotos: in Auswertung Fotos im Verlauf festhalten, automatisch verkleinert'] },
   { v: '3.59', changes: ['Backup teilen: per Teilen-Menü direkt in OneDrive, Drive, Mail usw. sichern'] },
   { v: '3.58', changes: ['Manueller Eintrag: Makros per KI schätzen (Knopf, nur bei API-Key)'] },
@@ -7696,12 +7697,40 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
   const [showChangelog, setShowChangelog] = useState(false);
   const target = calcDailyKcal(s);
 
-  const exportData = () => {
-    const blob = new Blob([JSON.stringify({ settings: s, entries, glossary, dishes, weights, progressPhotos, activities, workouts, activityEntries, notes, savedAnalyses, alcoholLog, intimacyLog, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `torcal-${todayKey()}.json`; a.click();
-    URL.revokeObjectURL(url);
+  const exportData = async () => {
+    const json = JSON.stringify({ settings: s, entries, glossary, dishes, weights, progressPhotos, activities, workouts, activityEntries, notes, savedAnalyses, alcoholLog, intimacyLog, exportedAt: new Date().toISOString() }, null, 2);
+    const filename = `torcal-${todayKey()}.json`;
+    // Versuch 1: a-Tag-Download (klassisch)
+    try {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return;
+    } catch (err) {
+      // Versuch 2: Fallback auf Share-API
+      try {
+        const file = new File([json], filename, { type: 'application/json' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: 'Torcal Backup' });
+          return;
+        }
+      } catch {}
+      // Versuch 3: in neuem Tab öffnen, User kopiert manuell
+      try {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        alert('Download wurde im neuen Tab geöffnet. Bitte dort speichern.');
+        return;
+      } catch {}
+      alert('Export fehlgeschlagen: ' + (err.message || 'unbekannter Fehler') + '. Versuche stattdessen "Backup teilen".');
+    }
   };
 
   // Backup direkt per Web Share API teilen (z.B. nach OneDrive, Drive, Mail)
@@ -7749,12 +7778,29 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
   };
 
   // Nur das Glossar exportieren (für Analyse/Korrektur)
-  const exportGlossary = () => {
-    const blob = new Blob([JSON.stringify({ glossary, exportedAt: new Date().toISOString(), type: 'torcal-glossary' }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `torcal-glossar-${todayKey()}.json`; a.click();
-    URL.revokeObjectURL(url);
+  const exportGlossary = async () => {
+    const json = JSON.stringify({ glossary, exportedAt: new Date().toISOString(), type: 'torcal-glossary' }, null, 2);
+    const filename = `torcal-glossar-${todayKey()}.json`;
+    try {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      try {
+        const file = new File([json], filename, { type: 'application/json' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: 'Torcal Glossar' });
+          return;
+        }
+      } catch {}
+      alert('Export fehlgeschlagen: ' + (err.message || 'unbekannt'));
+    }
   };
 
   // Nur das Glossar importieren (ersetzt nur das Glossar, Rest bleibt)
