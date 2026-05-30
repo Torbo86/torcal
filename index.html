@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.59';
+const APP_VERSION = '3.60';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.60', changes: ['Fortschrittsfotos: in Auswertung Fotos im Verlauf festhalten, automatisch verkleinert'] },
   { v: '3.59', changes: ['Backup teilen: per Teilen-Menü direkt in OneDrive, Drive, Mail usw. sichern'] },
   { v: '3.58', changes: ['Manueller Eintrag: Makros per KI schätzen (Knopf, nur bei API-Key)'] },
   { v: '3.57', changes: ['Bier & Crémant tracken jetzt auch Makros (Bier ~11g KH/Glas), skalierend'] },
@@ -1108,6 +1109,7 @@ function App() {
   const [workouts, setWorkouts] = useState([]); // gespeicherte Kombis
   const [activityEntries, setActivityEntries] = useState([]); // [{id, dateKey, time, activityId, activityName, met, durationMin, weightKg, kcal}]
   const [weights, setWeights] = useState([]);
+  const [progressPhotos, setProgressPhotos] = useState([]); // [{id, date, dataUrl, note}]
   const [savedAnalyses, setSavedAnalyses] = useState([]); // [{id, date, kind, text, createdAt}]
   const [notes, setNotes] = useState([]); // [{id, text, type: 'bug'|'idea', done, createdAt}]
   const [coffeeLog, setCoffeeLog] = useState({}); // { 'YYYY-MM-DD': count }
@@ -1292,6 +1294,7 @@ function App() {
       const d = await loadKey('dishes', []);
       const e = await loadKey('entries', []);
       const w = await loadKey('weights', []);
+      const photos = await loadKey('progressPhotos', []);
       const acts = await loadKey('activities', DEFAULT_ACTIVITIES);
       const wos = await loadKey('workouts', []);
       const aEntries = await loadKey('activityEntries', []);
@@ -1336,6 +1339,7 @@ function App() {
       setDishes(d);
       setEntries(e);
       setWeights(w);
+      setProgressPhotos(photos);
       setActivities(acts);
       setWorkouts(wos);
       setActivityEntries(aEntries);
@@ -1425,6 +1429,50 @@ function App() {
   const persistGlossary = async (next) => { setGlossary(next); await saveKey('glossary', next); };
   const persistDishes = async (next) => { setDishes(next); await saveKey('dishes', next); };
   const persistWeights = async (next) => { setWeights(next); await saveKey('weights', next); };
+  const persistProgressPhotos = async (next) => { setProgressPhotos(next); await saveKey('progressPhotos', next); };
+
+  // Bild auf max. 800px verkleinern, JPEG bei 0.82 Qualität (~100-180 KB)
+  const resizePhoto = (file) => new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => { img.src = reader.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      const maxSize = 800;
+      let { width, height } = img;
+      if (width > height) {
+        if (width > maxSize) { height = Math.round(height * (maxSize / width)); width = maxSize; }
+      } else {
+        if (height > maxSize) { width = Math.round(width * (maxSize / height)); height = maxSize; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const addProgressPhoto = async (file) => {
+    try {
+      const dataUrl = await resizePhoto(file);
+      const photo = {
+        id: crypto.randomUUID(),
+        date: todayKey(),
+        dataUrl,
+        note: '',
+      };
+      await persistProgressPhotos([photo, ...progressPhotos]);
+    } catch (err) {
+      alert('Foto konnte nicht verarbeitet werden: ' + (err.message || 'unbekannter Fehler'));
+    }
+  };
+
+  const deleteProgressPhoto = async (id) => {
+    await persistProgressPhotos(progressPhotos.filter(p => p.id !== id));
+  };
   const persistActivities = async (next) => { setActivities(next); await saveKey('activities', next); };
   const persistWorkouts = async (next) => { setWorkouts(next); await saveKey('workouts', next); };
   const persistSavedAnalyses = async (next) => { setSavedAnalyses(next); await saveKey('savedAnalyses', next); };
@@ -1852,6 +1900,7 @@ function App() {
             if (data.glossary) await persistGlossary(data.glossary);
             if (data.dishes) await persistDishes(data.dishes);
             if (data.weights) await persistWeights(data.weights);
+            if (data.progressPhotos) await persistProgressPhotos(data.progressPhotos);
             if (data.activities) await persistActivities(data.activities);
             if (data.workouts) await persistWorkouts(data.workouts);
             if (data.activityEntries) await persistActivityEntries(data.activityEntries);
@@ -2328,6 +2377,9 @@ function App() {
           glossary={glossary}
           target={dailyTarget}
           weights={weights}
+          progressPhotos={progressPhotos}
+          onAddProgressPhoto={addProgressPhoto}
+          onDeleteProgressPhoto={deleteProgressPhoto}
           settings={settings}
           apiKey={apiKey}
           selectedDate={selectedDate}
@@ -2592,6 +2644,7 @@ function App() {
             if (data.glossary) await persistGlossary(data.glossary);
             if (data.dishes) await persistDishes(data.dishes);
             if (data.weights) await persistWeights(data.weights);
+            if (data.progressPhotos) await persistProgressPhotos(data.progressPhotos);
             if (data.activities) await persistActivities(data.activities);
             if (data.workouts) await persistWorkouts(data.workouts);
             if (data.activityEntries) await persistActivityEntries(data.activityEntries);
@@ -6434,12 +6487,15 @@ function FoodEditor({ food, onSave, onDelete, onCancel, apiKey = '' }) {
 }
 
 // === Stats ===
-function Stats({ entries, activityEntries = [], glossary = [], target, weights = [], settings, apiKey = '', selectedDate, setSelectedDate, savedAnalyses = [], onSaveAnalysis, onDeleteAnalysis, onAddWeight, onDeleteWeight, onBack, onExportDay, onExportRange }) {
+function Stats({ entries, activityEntries = [], glossary = [], target, weights = [], progressPhotos = [], onAddProgressPhoto, onDeleteProgressPhoto, settings, apiKey = '', selectedDate, setSelectedDate, savedAnalyses = [], onSaveAnalysis, onDeleteAnalysis, onAddWeight, onDeleteWeight, onBack, onExportDay, onExportRange }) {
   const [range, setRange] = useState('week'); // week | month
   const [showAddWeight, setShowAddWeight] = useState(false);
   const [newWeight, setNewWeight] = useState('');
   const [newWeightDate, setNewWeightDate] = useState(todayKey());
   const [weightRange, setWeightRange] = useState(90); // Tage
+  const [showPhotos, setShowPhotos] = useState(false);
+  const [viewingPhoto, setViewingPhoto] = useState(null); // großes Foto anzeigen
+  const photoFileRef = useRef(null);
   const [showAllWeights, setShowAllWeights] = useState(false);
   const [analysis, setAnalysis] = useState(null); // { text, date, kind }
   const [analysisLoading, setAnalysisLoading] = useState(false);
@@ -6902,6 +6958,116 @@ Aufgabe: ${aufgabe}`;
           </>
         )}
       </div>
+
+      {/* === Fortschrittsfotos === */}
+      <div style={{ background: '#F1ECDC', borderRadius: 16, padding: 20, marginBottom: 16 }}>
+        <button
+          onClick={() => setShowPhotos(!showPhotos)}
+          style={{
+            width: '100%', background: 'transparent', border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            cursor: 'pointer', padding: 0,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16 }}>📷</span>
+            <span style={{ fontFamily: 'Fraunces', fontSize: 17, fontWeight: 600, color: '#0D3B2E' }}>Fortschrittsfotos</span>
+            {progressPhotos.length > 0 && (
+              <span style={{ fontFamily: 'Inter', fontSize: 11, color: '#5C6B5E' }}>· {progressPhotos.length}</span>
+            )}
+          </div>
+          <span style={{ fontFamily: 'Inter', fontSize: 11, color: '#5C6B5E' }}>{showPhotos ? '▲' : '▼'}</span>
+        </button>
+
+        {/* Sanfte Erinnerung — wenn Fotos vorhanden und letztes >10 Tage her */}
+        {!showPhotos && progressPhotos.length > 0 && (() => {
+          const newest = [...progressPhotos].sort((a,b) => b.date.localeCompare(a.date))[0];
+          const daysSince = Math.floor((Date.now() - new Date(newest.date).getTime()) / (1000*60*60*24));
+          if (daysSince >= 10) {
+            return (
+              <div style={{ marginTop: 8, fontFamily: 'Inter', fontSize: 11, color: '#8B7355', fontStyle: 'italic' }}>
+                Letztes Foto vor {daysSince} Tagen — Zeit für ein neues?
+              </div>
+            );
+          }
+          return null;
+        })()}
+
+        {showPhotos && (
+          <div style={{ marginTop: 16 }}>
+            <input
+              ref={photoFileRef}
+              type="file"
+              accept="image/*"
+              capture="user"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (f) await onAddProgressPhoto(f);
+                e.target.value = '';
+              }}
+              style={{ display: 'none' }}
+            />
+            <button
+              onClick={() => photoFileRef.current?.click()}
+              style={{
+                width: '100%', background: 'rgba(13,59,46,0.08)', color: '#0D3B2E',
+                border: '1px solid rgba(13,59,46,0.2)', borderRadius: 8,
+                padding: '12px', fontFamily: 'Inter', fontSize: 13, fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >📷 Fortschrittsfoto aufnehmen</button>
+
+            <div style={{ fontFamily: 'Inter', fontSize: 11, color: '#5C6B5E', marginTop: 8, lineHeight: 1.5 }}>
+              Empfohlen alle 1-2 Wochen, am besten gleiche Uhrzeit, gleiches Licht.
+              Vergleiche zwischen kürzeren Abständen können wegen Wasser-Schwankungen täuschen.
+            </div>
+
+            {progressPhotos.length === 0 ? (
+              <div style={{ marginTop: 16, padding: 16, textAlign: 'center', fontFamily: 'Inter', fontSize: 12, color: '#5C6B5E', background: 'rgba(13,59,46,0.04)', borderRadius: 8 }}>
+                Noch keine Fotos. Das erste markiert deinen Startpunkt.
+              </div>
+            ) : (
+              <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {[...progressPhotos].sort((a,b) => b.date.localeCompare(a.date)).map(p => (
+                  <div key={p.id} style={{ position: 'relative', aspectRatio: '1/1', borderRadius: 8, overflow: 'hidden', background: '#0D3B2E', cursor: 'pointer' }} onClick={() => setViewingPhoto(p)}>
+                    <img src={p.dataUrl} alt="Fortschritt" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', padding: '12px 6px 4px', fontFamily: 'Inter', fontSize: 10, color: '#FAF6EC', textAlign: 'center' }}>
+                      {new Date(p.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Großansicht eines Fotos */}
+      {viewingPhoto && (
+        <div onClick={() => setViewingPhoto(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ maxWidth: '100%', maxHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+            <img src={viewingPhoto.dataUrl} alt="Fortschritt" style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain', borderRadius: 8 }} />
+            <div style={{ color: '#FAF6EC', fontFamily: 'Inter', fontSize: 13 }}>
+              {new Date(viewingPhoto.date).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => setViewingPhoto(null)}
+                style={{ background: 'rgba(250,246,236,0.15)', border: '1px solid rgba(250,246,236,0.3)', borderRadius: 8, padding: '8px 16px', fontFamily: 'Inter', fontSize: 13, color: '#FAF6EC', cursor: 'pointer' }}
+              >Schließen</button>
+              <button
+                onClick={async () => {
+                  if (confirm('Foto wirklich löschen?')) {
+                    await onDeleteProgressPhoto(viewingPhoto.id);
+                    setViewingPhoto(null);
+                  }
+                }}
+                style={{ background: 'rgba(160,58,53,0.2)', border: '1px solid rgba(160,58,53,0.5)', borderRadius: 8, padding: '8px 16px', fontFamily: 'Inter', fontSize: 13, color: '#FAF6EC', cursor: 'pointer' }}
+              >Löschen</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Gewicht eintragen Sheet */}
       {showAddWeight && (
@@ -7531,7 +7697,7 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
   const target = calcDailyKcal(s);
 
   const exportData = () => {
-    const blob = new Blob([JSON.stringify({ settings: s, entries, glossary, dishes, weights, activities, workouts, activityEntries, notes, savedAnalyses, alcoholLog, intimacyLog, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ settings: s, entries, glossary, dishes, weights, progressPhotos, activities, workouts, activityEntries, notes, savedAnalyses, alcoholLog, intimacyLog, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `torcal-${todayKey()}.json`; a.click();
@@ -7540,7 +7706,7 @@ function SettingsView({ settings, entries, glossary, dishes = [], weights = [], 
 
   // Backup direkt per Web Share API teilen (z.B. nach OneDrive, Drive, Mail)
   const shareData = async () => {
-    const json = JSON.stringify({ settings: s, entries, glossary, dishes, weights, activities, workouts, activityEntries, notes, savedAnalyses, alcoholLog, intimacyLog, exportedAt: new Date().toISOString() }, null, 2);
+    const json = JSON.stringify({ settings: s, entries, glossary, dishes, weights, progressPhotos, activities, workouts, activityEntries, notes, savedAnalyses, alcoholLog, intimacyLog, exportedAt: new Date().toISOString() }, null, 2);
     const filename = `torcal-${todayKey()}.json`;
     try {
       // Versuche, eine echte Datei zu teilen (funktioniert auf Mobile)
