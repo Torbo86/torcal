@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.67';
+const APP_VERSION = '3.68';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.68', changes: ['Rezept-Import gefixt: nutzt jetzt korrekte Gericht-Struktur, schützt vor altem Crash'] },
   { v: '3.67', changes: ['Rezept-Import: ganzes Gericht aus Claude-Chat als JSON, fehlende Lebensmittel werden mitangelegt'] },
   { v: '3.66', changes: ['KI-Knopf jetzt auch im Glossar-Editor: Name eintippen, ✨, alle Felder gefüllt'] },
   { v: '3.65', changes: ['KI-Suche: unbekannte Lebensmittel direkt per Tap ergänzen (Name, kcal, Makros auf einmal)'] },
@@ -1388,7 +1389,8 @@ function App() {
       const showInt = await loadKey('showIntimacy', false);
       setSettings(s);
       setGlossary(mergedGlossary);
-      setDishes(d);
+      // Defekte Gerichte (ohne items-Array) herausfiltern, damit die App nicht crasht
+      setDishes((d || []).filter(dish => Array.isArray(dish?.items)));
       setEntries(e);
       setWeights(w);
       setProgressPhotos(photos);
@@ -2428,25 +2430,26 @@ function App() {
                 await persistGlossary(updatedGlossary);
               }
             }
-            // 2) Zutaten auf Glossar-Einträge mappen
-            const ingredients = (recipe.dish.ingredients || []).map(ing => {
-              const food = updatedGlossary.find(g => g.name.toLowerCase().trim() === ing.name.toLowerCase().trim());
-              return {
-                foodId: food ? food.id : null,
-                foodName: ing.name,
-                qty: +ing.qty || 0,
-                unit: ing.unit || 'g',
-              };
-            });
-            // 3) Gericht anlegen
+            // 2) Zutaten auf Glossar-Einträge mappen (nur die mit foodId können benutzt werden)
+            const items = (recipe.dish.ingredients || [])
+              .map(ing => {
+                const food = updatedGlossary.find(g => g.name.toLowerCase().trim() === ing.name.toLowerCase().trim());
+                if (!food) return null; // Zutat nicht gefunden → wird übersprungen
+                return { foodId: food.id, qty: +ing.qty || 0, unit: ing.unit || 'g' };
+              })
+              .filter(Boolean);
+            if (items.length === 0) {
+              throw new Error('Keine Zutaten konnten zugeordnet werden — fehlende Lebensmittel zuerst anlegen.');
+            }
+            // 3) Gericht anlegen (Struktur wie bestehend: items, nicht ingredients)
             const newDish = {
               id: 'd' + crypto.randomUUID().slice(0, 8),
               name: recipe.dish.name,
-              portions: +recipe.dish.portions || 1,
-              ingredients,
+              items,
+              createdAt: new Date().toISOString(),
             };
             await persistDishes([...dishes, newDish]);
-            return { addedFoods: recipe.newFoods?.length || 0, addedDish: newDish.name };
+            return { addedFoods: recipe.newFoods?.length || 0, addedDish: newDish.name, addedItems: items.length };
           }}
           onBack={() => setView('today')}
         />
