@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.66';
+const APP_VERSION = '3.67';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.67', changes: ['Rezept-Import: ganzes Gericht aus Claude-Chat als JSON, fehlende Lebensmittel werden mitangelegt'] },
   { v: '3.66', changes: ['KI-Knopf jetzt auch im Glossar-Editor: Name eintippen, ✨, alle Felder gefüllt'] },
   { v: '3.65', changes: ['KI-Suche: unbekannte Lebensmittel direkt per Tap ergänzen (Name, kcal, Makros auf einmal)'] },
   { v: '3.64', changes: ['Teilen-Knopf ehrlicher beschriftet: macht jetzt erst Teilen oder fällt auf Download zurück'] },
@@ -2404,6 +2405,48 @@ function App() {
             setPendingDishItems(items);
             setInputMode('text');
             setView('input');
+          }}
+          onImportRecipe={async (recipe) => {
+            // recipe: { dish: { name, portions, ingredients: [{name, qty, unit}] }, newFoods: [...] }
+            // 1) Fehlende Foods ergänzen (Name-Abgleich, keine Duplikate)
+            let updatedGlossary = glossary;
+            if (Array.isArray(recipe.newFoods) && recipe.newFoods.length > 0) {
+              const existingNames = new Set(updatedGlossary.map(g => g.name.toLowerCase().trim()));
+              const toAdd = recipe.newFoods
+                .filter(f => f && f.name && !existingNames.has(f.name.toLowerCase().trim()))
+                .map(f => ({
+                  id: 'g' + crypto.randomUUID().slice(0, 8),
+                  name: f.name,
+                  kcalPer100g: +f.kcalPer100g || 0,
+                  protein: +(f.protein || 0),
+                  carbs: +(f.carbs || 0),
+                  fat: +(f.fat || 0),
+                  units: f.units && typeof f.units === 'object' ? f.units : { g: 1 },
+                }));
+              if (toAdd.length > 0) {
+                updatedGlossary = [...updatedGlossary, ...toAdd];
+                await persistGlossary(updatedGlossary);
+              }
+            }
+            // 2) Zutaten auf Glossar-Einträge mappen
+            const ingredients = (recipe.dish.ingredients || []).map(ing => {
+              const food = updatedGlossary.find(g => g.name.toLowerCase().trim() === ing.name.toLowerCase().trim());
+              return {
+                foodId: food ? food.id : null,
+                foodName: ing.name,
+                qty: +ing.qty || 0,
+                unit: ing.unit || 'g',
+              };
+            });
+            // 3) Gericht anlegen
+            const newDish = {
+              id: 'd' + crypto.randomUUID().slice(0, 8),
+              name: recipe.dish.name,
+              portions: +recipe.dish.portions || 1,
+              ingredients,
+            };
+            await persistDishes([...dishes, newDish]);
+            return { addedFoods: recipe.newFoods?.length || 0, addedDish: newDish.name };
           }}
           onBack={() => setView('today')}
         />
@@ -5880,9 +5923,38 @@ function ParsedRow({ item, idx, onChange, onRemove, onLookup, onEstimateMacros, 
 }
 
 // === Dishes ===
-function Dishes({ dishes, glossary, onChange, onUseDish, onBack }) {
+function Dishes({ dishes, glossary, onChange, onUseDish, onImportRecipe, onBack }) {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null); // dish-Objekt zum Bearbeiten
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importMessage, setImportMessage] = useState(null); // {ok, text}
+
+  // Rezept-JSON aus dem Chat parsen
+  const parsedRecipe = (() => {
+    if (!importText.trim()) return null;
+    let text = importText.trim();
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    if (!text.startsWith('{')) {
+      const m = text.match(/\{[\s\S]*\}/);
+      if (m) text = m[0];
+    }
+    try {
+      const obj = JSON.parse(text);
+      if (!obj || !obj.dish || !obj.dish.name || !Array.isArray(obj.dish.ingredients)) return null;
+      // Existierende Zutaten zählen
+      const existingNames = new Set(glossary.map(g => g.name.toLowerCase().trim()));
+      const newFoodsCount = (obj.newFoods || []).filter(f => f && f.name && !existingNames.has(f.name.toLowerCase().trim())).length;
+      const totalIngredients = obj.dish.ingredients.length;
+      return {
+        recipe: obj,
+        dishName: obj.dish.name,
+        portions: obj.dish.portions || 1,
+        totalIngredients,
+        newFoodsCount,
+      };
+    } catch { return null; }
+  })();
 
   const filtered = dishes.filter(d => d.name.toLowerCase().includes(search.toLowerCase()));
 
@@ -5897,6 +5969,83 @@ function Dishes({ dishes, glossary, onChange, onUseDish, onBack }) {
         <Search size={16} style={{ position: 'absolute', left: 14, top: 14, color: 'rgba(250,246,236,0.5)' }} />
         <input placeholder="Suche..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...styles.input, paddingLeft: 40 }} />
       </div>
+
+      {/* Rezept-Import */}
+      {onImportRecipe && (
+        <div style={{ marginBottom: 16 }}>
+          {!showImport ? (
+            <button
+              onClick={() => setShowImport(true)}
+              style={{
+                width: '100%', background: 'rgba(250,246,236,0.06)',
+                border: '1px dashed rgba(250,246,236,0.25)', borderRadius: 10,
+                padding: '12px', cursor: 'pointer',
+                fontFamily: 'Inter', fontSize: 13, fontWeight: 500, color: 'rgba(250,246,236,0.75)',
+              }}
+            >📥 Rezept importieren (aus Claude-Chat)</button>
+          ) : (
+            <div style={{ background: 'rgba(250,246,236,0.06)', border: '1px solid rgba(250,246,236,0.15)', borderRadius: 10, padding: 12 }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.55)', marginBottom: 6 }}>
+                Rezept importieren
+              </div>
+              <div style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(250,246,236,0.6)', marginBottom: 8, lineHeight: 1.5 }}>
+                Frag im Claude-Chat nach einem Rezept "als Torcal-Import". Den JSON-Block hier einfügen.
+              </div>
+              <textarea
+                value={importText}
+                onChange={e => { setImportText(e.target.value); setImportMessage(null); }}
+                placeholder='Hier den Rezept-JSON-Block aus dem Chat einfügen...'
+                rows={6}
+                style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(0,0,0,0.25)', color: '#FAF6EC', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 6, padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, outline: 'none', resize: 'vertical' }}
+              />
+              {importText.trim() && (
+                <div style={{ marginTop: 8 }}>
+                  {parsedRecipe ? (
+                    <div style={{ background: 'rgba(144,200,168,0.1)', border: '1px solid rgba(144,200,168,0.3)', borderRadius: 6, padding: 10, fontFamily: 'Inter', fontSize: 12, color: '#FAF6EC', lineHeight: 1.5 }}>
+                      <div style={{ fontWeight: 600 }}>{parsedRecipe.dishName}</div>
+                      <div style={{ fontSize: 11, color: 'rgba(250,246,236,0.75)', marginTop: 4 }}>
+                        {parsedRecipe.portions} {parsedRecipe.portions === 1 ? 'Portion' : 'Portionen'} · {parsedRecipe.totalIngredients} Zutaten
+                        {parsedRecipe.newFoodsCount > 0 && (
+                          <> · <span style={{ color: '#90C8A8' }}>{parsedRecipe.newFoodsCount} neue Lebensmittel werden angelegt</span></>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ background: 'rgba(232,168,124,0.1)', border: '1px solid rgba(232,168,124,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 11, color: '#E8A87C' }}>
+                      Kein gültiges Rezept-JSON erkannt. Erwartet wird: {`{ dish: { name, portions, ingredients: [...] }, newFoods: [...] }`}
+                    </div>
+                  )}
+                </div>
+              )}
+              {importMessage && (
+                <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: importMessage.ok ? 'rgba(144,200,168,0.15)' : 'rgba(232,168,124,0.1)', border: `1px solid ${importMessage.ok ? 'rgba(144,200,168,0.4)' : 'rgba(232,168,124,0.3)'}`, fontFamily: 'Inter', fontSize: 12, color: importMessage.ok ? '#FAF6EC' : '#E8A87C' }}>
+                  {importMessage.text}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                {parsedRecipe && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await onImportRecipe(parsedRecipe.recipe);
+                        setImportMessage({ ok: true, text: `Gericht "${res.addedDish}" gespeichert${res.addedFoods > 0 ? ` (${res.addedFoods} neue Lebensmittel angelegt)` : ''}.` });
+                        setImportText('');
+                      } catch (err) {
+                        setImportMessage({ ok: false, text: 'Import fehlgeschlagen: ' + (err.message || 'unbekannt') });
+                      }
+                    }}
+                    style={{ flex: 1, background: '#1A5340', border: '1px solid #90C8A8', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC' }}
+                  >Importieren</button>
+                )}
+                <button
+                  onClick={() => { setShowImport(false); setImportText(''); setImportMessage(null); }}
+                  style={{ flex: parsedRecipe ? 0 : 1, background: 'transparent', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 8, padding: '10px 16px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.8)' }}
+                >Schließen</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {dishes.length === 0 && (
         <div style={{ textAlign: 'center', padding: '40px 20px', color: 'rgba(250,246,236,0.6)', fontFamily: 'Inter', fontSize: 14, lineHeight: 1.6 }}>
