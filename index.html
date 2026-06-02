@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.69';
+const APP_VERSION = '3.70';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.70', changes: ['KI-Suche zweigeteilt: Einzelnes Lebensmittel ODER Gericht aus Komponenten anlegen'] },
   { v: '3.69', changes: ['Gerichte mit Portionen: beim Eintragen aussuchen, wie viel davon (0,5 / 1 / 2 ...)'] },
   { v: '3.68', changes: ['Rezept-Import gefixt: nutzt jetzt korrekte Gericht-Struktur, schützt vor altem Crash'] },
   { v: '3.67', changes: ['Rezept-Import: ganzes Gericht aus Claude-Chat als JSON, fehlende Lebensmittel werden mitangelegt'] },
@@ -894,6 +895,79 @@ const DE_EN = {
   // Getränke
   'wasser':'water','saft':'juice','apfelsaft':'apple juice','orangensaft':'orange juice',
   'bier':'beer','wein':'wine','kaffee':'coffee','tee':'tea','cola':'cola','limonade':'lemonade',
+};
+
+// Gericht in Einzelkomponenten zerlegen (z.B. "Kassler mit Kartoffeln" -> [Kassler, Kartoffeln, Senf-Honig-Sauce])
+const estimateDishComponentsFromName = async (name, apiKey) => {
+  if (!apiKey) throw new Error('Kein API-Key');
+  const prompt = `Zerlege das Gericht "${name}" in seine Einzelkomponenten für eine Diät-Tracker-App.
+
+Antworte AUSSCHLIESSLICH als JSON-Block in genau diesem Format, ohne weiteren Text:
+{
+  "dishName": "...",
+  "portions": 1,
+  "components": [
+    { "name": "...", "qty": 0, "unit": "g", "kcalPer100g": 0, "protein": 0, "carbs": 0, "fat": 0, "units": {"g": 1} }
+  ]
+}
+
+Wichtig:
+- "dishName": sinnvoller kompakter Name des Gerichts
+- "portions": meist 1 (eine Portion)
+- "components": Einzel-Lebensmittel mit ihrer typischen Menge in der Portion und Nährwerten pro 100g
+- "qty": Menge in der Portion (in der unit)
+- "unit": Einheit (g, ml o.a.)
+- "kcalPer100g", "protein", "carbs", "fat": pro 100g des einzelnen Lebensmittels
+- "units": Einheiten-Map mit Gramm-Werten, immer mindestens {"g": 1}
+
+Beispiel "Kassler mit Kartoffeln und Senf-Honig-Sauce":
+{
+  "dishName": "Kassler mit Kartoffeln und Senf-Honig-Sauce",
+  "portions": 1,
+  "components": [
+    { "name": "Kassler", "qty": 200, "unit": "g", "kcalPer100g": 200, "protein": 18, "carbs": 0, "fat": 14, "units": {"g": 1} },
+    { "name": "Kartoffeln", "qty": 250, "unit": "g", "kcalPer100g": 77, "protein": 2, "carbs": 17, "fat": 0.1, "units": {"g": 1, "Stück": 150} },
+    { "name": "Senf-Honig-Sauce", "qty": 30, "unit": "g", "kcalPer100g": 200, "protein": 3, "carbs": 25, "fat": 8, "units": {"g": 1, "EL": 15} }
+  ]
+}`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error('API-Fehler');
+  const data = await res.json();
+  const text = data?.content?.[0]?.text || '';
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Keine Antwort');
+  const obj = JSON.parse(match[0]);
+  if (!obj.dishName || !Array.isArray(obj.components) || obj.components.length === 0) {
+    throw new Error('Ungültige Antwort');
+  }
+  return {
+    dishName: String(obj.dishName).trim(),
+    portions: +obj.portions || 1,
+    components: obj.components.map(c => ({
+      name: String(c.name).trim(),
+      qty: +c.qty || 0,
+      unit: c.unit || 'g',
+      kcalPer100g: +c.kcalPer100g || 0,
+      protein: +(c.protein || 0),
+      carbs: +(c.carbs || 0),
+      fat: +(c.fat || 0),
+      units: c.units && typeof c.units === 'object' ? c.units : { g: 1 },
+    })),
+  };
 };
 
 // Komplettes Lebensmittel per KI ergänzen — nur Name -> alles inkl. kcal & Einheiten
@@ -5157,43 +5231,124 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
               {/* HAUPTWEG: KI-Suche (wenn API-Key da) */}
               {apiKey && (
                 <div style={{ marginBottom: 10 }}>
-                  <button
-                    disabled={kiSearching}
-                    onClick={async () => {
-                      setKiSearchError('');
-                      setKiSearching(true);
-                      try {
-                        const food = await estimateFullFoodFromName(textInput.trim(), apiKey);
-                        const newItem = {
-                          id: 'g' + crypto.randomUUID().slice(0, 8),
-                          name: food.name,
-                          kcalPer100g: food.kcalPer100g,
-                          protein: food.protein,
-                          carbs: food.carbs,
-                          fat: food.fat,
-                          units: food.units,
-                        };
-                        await persistGlossary([...glossary, newItem]);
-                        addFromSearch(newItem);
-                        setTextInput('');
-                      } catch (err) {
-                        setKiSearchError(err.message || 'Fehler bei der KI-Anfrage');
-                      } finally {
-                        setKiSearching(false);
-                      }
-                    }}
-                    style={{
-                      width: '100%', background: '#1A5340',
-                      border: '1px solid #90C8A8', borderRadius: 10,
-                      padding: '14px 14px', cursor: kiSearching ? 'wait' : 'pointer',
-                      fontFamily: 'Inter', fontSize: 14, fontWeight: 600, color: '#FAF6EC',
-                      opacity: kiSearching ? 0.6 : 1,
-                    }}
-                  >
-                    {kiSearching ? '… KI sucht …' : `✨ Per KI ergänzen: "${textInput}"`}
-                  </button>
-                  <div style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(250,246,236,0.5)', marginTop: 4, lineHeight: 1.4 }}>
-                    KI ergänzt Kalorien & Makros, legt das Lebensmittel ins Glossar und trägt es ein. Kostet Bruchteile eines Cents.
+                  <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.55)', marginBottom: 6 }}>
+                    Per KI ergänzen
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <button
+                      disabled={kiSearching}
+                      onClick={async () => {
+                        setKiSearchError('');
+                        setKiSearching(true);
+                        try {
+                          const food = await estimateFullFoodFromName(textInput.trim(), apiKey);
+                          const newItem = {
+                            id: 'g' + crypto.randomUUID().slice(0, 8),
+                            name: food.name,
+                            kcalPer100g: food.kcalPer100g,
+                            protein: food.protein,
+                            carbs: food.carbs,
+                            fat: food.fat,
+                            units: food.units,
+                          };
+                          await persistGlossary([...glossary, newItem]);
+                          addFromSearch(newItem);
+                          setTextInput('');
+                        } catch (err) {
+                          setKiSearchError(err.message || 'Fehler bei der KI-Anfrage');
+                        } finally {
+                          setKiSearching(false);
+                        }
+                      }}
+                      style={{
+                        width: '100%', background: '#1A5340',
+                        border: '1px solid #90C8A8', borderRadius: 10,
+                        padding: '14px 14px', cursor: kiSearching ? 'wait' : 'pointer',
+                        fontFamily: 'Inter', fontSize: 14, fontWeight: 600, color: '#FAF6EC',
+                        opacity: kiSearching ? 0.6 : 1, textAlign: 'left',
+                      }}
+                    >
+                      {kiSearching ? '… KI sucht …' : '✨ Als einzelnes Lebensmittel'}
+                      <div style={{ fontFamily: 'Inter', fontSize: 10, fontWeight: 400, color: 'rgba(250,246,236,0.7)', marginTop: 2 }}>
+                        Ein Eintrag im Glossar (z.B. Pfefferminz Eis, Rührei, Banane)
+                      </div>
+                    </button>
+                    <button
+                      disabled={kiSearching}
+                      onClick={async () => {
+                        setKiSearchError('');
+                        setKiSearching(true);
+                        try {
+                          const result = await estimateDishComponentsFromName(textInput.trim(), apiKey);
+                          // 1) Komponenten ins Glossar (nur neue)
+                          const existingNames = new Set(glossary.map(g => g.name.toLowerCase().trim()));
+                          const newItems = [];
+                          const componentMap = []; // {foodId, qty, unit, name}
+                          let updatedGlossary = [...glossary];
+                          for (const c of result.components) {
+                            const existing = updatedGlossary.find(g => g.name.toLowerCase().trim() === c.name.toLowerCase().trim());
+                            if (existing) {
+                              componentMap.push({ foodId: existing.id, qty: c.qty, unit: c.unit });
+                            } else {
+                              const newFood = {
+                                id: 'g' + crypto.randomUUID().slice(0, 8),
+                                name: c.name,
+                                kcalPer100g: c.kcalPer100g,
+                                protein: c.protein,
+                                carbs: c.carbs,
+                                fat: c.fat,
+                                units: c.units,
+                              };
+                              newItems.push(newFood);
+                              updatedGlossary.push(newFood);
+                              componentMap.push({ foodId: newFood.id, qty: c.qty, unit: c.unit });
+                            }
+                          }
+                          if (newItems.length > 0) {
+                            await persistGlossary(updatedGlossary);
+                          }
+                          // 2) Gericht anlegen
+                          const newDish = {
+                            id: 'd' + crypto.randomUUID().slice(0, 8),
+                            name: result.dishName,
+                            items: componentMap,
+                            portions: result.portions || 1,
+                            createdAt: new Date().toISOString(),
+                          };
+                          await onSaveDish(newDish);
+                          // 3) Direkt in heutigen Tag eintragen
+                          const factor = 1 / (result.portions || 1);
+                          for (const c of result.components) {
+                            const food = updatedGlossary.find(g => g.name.toLowerCase().trim() === c.name.toLowerCase().trim());
+                            if (food) {
+                              addFromSearch({
+                                ...food,
+                                _initialQty: Math.round(c.qty * factor * 10) / 10,
+                                _initialUnit: c.unit,
+                              });
+                            }
+                          }
+                          setTextInput('');
+                          alert(`Gericht "${result.dishName}" angelegt mit ${result.components.length} Komponenten${newItems.length > 0 ? ` (${newItems.length} neue im Glossar)` : ''}.`);
+                        } catch (err) {
+                          setKiSearchError(err.message || 'Fehler bei der KI-Anfrage');
+                        } finally {
+                          setKiSearching(false);
+                        }
+                      }}
+                      style={{
+                        width: '100%', background: 'rgba(250,246,236,0.08)',
+                        border: '1px solid rgba(144,200,168,0.5)', borderRadius: 10,
+                        padding: '14px 14px', cursor: kiSearching ? 'wait' : 'pointer',
+                        fontFamily: 'Inter', fontSize: 14, fontWeight: 600, color: '#FAF6EC',
+                        opacity: kiSearching ? 0.6 : 1, textAlign: 'left',
+                      }}
+                    >
+                      🍽️ Als Gericht aus Komponenten
+                      <div style={{ fontFamily: 'Inter', fontSize: 10, fontWeight: 400, color: 'rgba(250,246,236,0.6)', marginTop: 2 }}>
+                        Ein Gericht mit Einzelzutaten (z.B. Kassler mit Kartoffeln und Soße)
+                      </div>
+                    </button>
                   </div>
                   {kiSearchError && (
                     <div style={{ background: 'rgba(232,168,124,0.1)', border: '1px solid rgba(232,168,124,0.3)', borderRadius: 6, padding: 8, marginTop: 6, fontFamily: 'Inter', fontSize: 11, color: '#E8A87C' }}>
