@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.70';
+const APP_VERSION = '3.71';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.71', changes: ['Gerichte mit Zubereitung: optionales Anleitung-Feld, ausklappbar in der Liste'] },
   { v: '3.70', changes: ['KI-Suche zweigeteilt: Einzelnes Lebensmittel ODER Gericht aus Komponenten anlegen'] },
   { v: '3.69', changes: ['Gerichte mit Portionen: beim Eintragen aussuchen, wie viel davon (0,5 / 1 / 2 ...)'] },
   { v: '3.68', changes: ['Rezept-Import gefixt: nutzt jetzt korrekte Gericht-Struktur, schützt vor altem Crash'] },
@@ -2522,6 +2523,7 @@ function App() {
               name: recipe.dish.name,
               items,
               portions: +recipe.dish.portions || 1, // Anzahl Portionen, für die die Mengen gelten
+              instructions: recipe.dish.instructions || '', // Zubereitung als Text
               createdAt: new Date().toISOString(),
             };
             await persistDishes([...dishes, newDish]);
@@ -6090,6 +6092,7 @@ function Dishes({ dishes, glossary, onChange, onUseDish, onImportRecipe, onBack 
   const [importText, setImportText] = useState('');
   const [importMessage, setImportMessage] = useState(null); // {ok, text}
   const [portionPicker, setPortionPicker] = useState(null); // {dish, portions}
+  const [expandedInstructions, setExpandedInstructions] = useState({}); // {dishId: true}
 
   // Rezept-JSON aus dem Chat parsen
   const parsedRecipe = (() => {
@@ -6239,6 +6242,33 @@ function Dishes({ dishes, glossary, onChange, onUseDish, onImportRecipe, onBack 
                 return food ? `${String(it.qty).replace('.', ',')} ${it.unit} ${food.name}` : '?';
               }).join(' · ')}
             </div>
+
+            {/* Ausklappbare Zubereitung */}
+            {d.instructions && d.instructions.trim() && (
+              <div>
+                <button
+                  onClick={() => setExpandedInstructions({ ...expandedInstructions, [d.id]: !expandedInstructions[d.id] })}
+                  style={{
+                    background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    fontFamily: 'Inter', fontSize: 12, fontWeight: 600, color: '#0D3B2E',
+                  }}
+                >
+                  <span>👨‍🍳 Zubereitung</span>
+                  <span style={{ fontSize: 10, color: '#5C6B5E' }}>{expandedInstructions[d.id] ? '▲' : '▼'}</span>
+                </button>
+                {expandedInstructions[d.id] && (
+                  <div style={{
+                    marginTop: 6, background: 'rgba(13,59,46,0.05)',
+                    border: '1px solid rgba(13,59,46,0.1)', borderRadius: 8,
+                    padding: '10px 12px', fontFamily: 'Inter', fontSize: 13,
+                    color: '#0D3B2E', lineHeight: 1.6, whiteSpace: 'pre-wrap',
+                  }}>
+                    {d.instructions}
+                  </div>
+                )}
+              </div>
+            )}
             <button
               onClick={() => {
                 const totalPortions = d.portions || 1;
@@ -6371,6 +6401,25 @@ function DishEditor({ dish, glossary, onSave, onDelete, onCancel }) {
         <h2 style={{ fontFamily: 'Fraunces', margin: '0 0 16px', color: '#FAF6EC', fontWeight: 600 }}>Gericht bearbeiten</h2>
         <Field label="Name">
           <input value={d.name} onChange={e => setD({ ...d, name: e.target.value })} style={styles.input} />
+        </Field>
+        <Field label="Portionen (für die die Mengen gelten)">
+          <input
+            type="number"
+            inputMode="numeric"
+            min="1"
+            value={d.portions || 1}
+            onChange={e => setD({ ...d, portions: +e.target.value || 1 })}
+            style={styles.input}
+          />
+        </Field>
+        <Field label="Zubereitung (optional)">
+          <textarea
+            value={d.instructions || ''}
+            onChange={e => setD({ ...d, instructions: e.target.value })}
+            placeholder="Schritt 1: ...&#10;Schritt 2: ..."
+            rows={5}
+            style={{ ...styles.input, fontFamily: 'Inter', fontSize: 13, resize: 'vertical', minHeight: 80 }}
+          />
         </Field>
         <Field label="Lebensmittel">
           {d.items.map((it, idx) => {
