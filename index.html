@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.71';
+const APP_VERSION = '3.72';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.72', changes: ['KI-Suche dritter Knopf: einmaliges Gericht schätzen ohne Glossar (z.B. Restaurantessen)'] },
   { v: '3.71', changes: ['Gerichte mit Zubereitung: optionales Anleitung-Feld, ausklappbar in der Liste'] },
   { v: '3.70', changes: ['KI-Suche zweigeteilt: Einzelnes Lebensmittel ODER Gericht aus Komponenten anlegen'] },
   { v: '3.69', changes: ['Gerichte mit Portionen: beim Eintragen aussuchen, wie viel davon (0,5 / 1 / 2 ...)'] },
@@ -896,6 +897,50 @@ const DE_EN = {
   // Getränke
   'wasser':'water','saft':'juice','apfelsaft':'apple juice','orangensaft':'orange juice',
   'bier':'beer','wein':'wine','kaffee':'coffee','tee':'tea','cola':'cola','limonade':'lemonade',
+};
+
+// Einmaliges Restaurant-Gericht per KI schätzen — Name -> kcal + Makros (kein Glossar)
+const estimateMealFromDescription = async (description, apiKey) => {
+  if (!apiKey) throw new Error('Kein API-Key');
+  const prompt = `Schätze die Nährwerte für eine einzelne Portion: "${description}"
+
+Antworte AUSSCHLIESSLICH als JSON in genau diesem Format, ohne weiteren Text:
+{ "name": "...", "kcal": 0, "protein": 0, "carbs": 0, "fat": 0 }
+
+- "name": kurzer, sauberer Name (max 50 Zeichen)
+- "kcal": Gesamtkalorien der Portion (nicht pro 100g!)
+- "protein", "carbs", "fat": Gesamtmenge in Gramm für diese Portion
+
+Wenn keine Mengenangabe gegeben ist, nimm eine normale Restaurantportion an. Wenn "klein/normal/groß/XL" oder konkrete Mengen erwähnt sind, berücksichtige das. Schätze realistisch, nicht zu niedrig — Restaurantgerichte haben oft mehr Öl/Butter als zu Hause.`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 300,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error('API-Fehler');
+  const data = await res.json();
+  const text = data?.content?.[0]?.text || '';
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Keine Antwort');
+  const obj = JSON.parse(match[0]);
+  if (!obj.name || typeof obj.kcal !== 'number') throw new Error('Ungültige Antwort');
+  return {
+    name: String(obj.name).trim(),
+    kcal: Math.round(+obj.kcal),
+    protein: Math.round((+obj.protein || 0) * 10) / 10,
+    carbs: Math.round((+obj.carbs || 0) * 10) / 10,
+    fat: Math.round((+obj.fat || 0) * 10) / 10,
+  };
 };
 
 // Gericht in Einzelkomponenten zerlegen (z.B. "Kassler mit Kartoffeln" -> [Kassler, Kartoffeln, Senf-Honig-Sauce])
@@ -5349,6 +5394,47 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
                       🍽️ Als Gericht aus Komponenten
                       <div style={{ fontFamily: 'Inter', fontSize: 10, fontWeight: 400, color: 'rgba(250,246,236,0.6)', marginTop: 2 }}>
                         Ein Gericht mit Einzelzutaten (z.B. Kassler mit Kartoffeln und Soße)
+                      </div>
+                    </button>
+                    <button
+                      disabled={kiSearching}
+                      onClick={async () => {
+                        setKiSearchError('');
+                        setKiSearching(true);
+                        try {
+                          const meal = await estimateMealFromDescription(textInput.trim(), apiKey);
+                          // Direkt als manueller Eintrag in die Vorschau
+                          setParsed([...parsed, {
+                            foodId: null,
+                            foodName: meal.name,
+                            qty: 1,
+                            unit: 'Portion',
+                            kcalPer100g: meal.kcal,
+                            protein: meal.protein,
+                            carbs: meal.carbs,
+                            fat: meal.fat,
+                            units: { 'Portion': 1 },
+                            isNew: false,
+                            isManual: true,
+                          }]);
+                          setTextInput('');
+                        } catch (err) {
+                          setKiSearchError(err.message || 'Fehler bei der KI-Anfrage');
+                        } finally {
+                          setKiSearching(false);
+                        }
+                      }}
+                      style={{
+                        width: '100%', background: 'rgba(232,168,124,0.12)',
+                        border: '1px solid rgba(232,168,124,0.5)', borderRadius: 10,
+                        padding: '14px 14px', cursor: kiSearching ? 'wait' : 'pointer',
+                        fontFamily: 'Inter', fontSize: 14, fontWeight: 600, color: '#FAF6EC',
+                        opacity: kiSearching ? 0.6 : 1, textAlign: 'left',
+                      }}
+                    >
+                      🍴 Einmaliges Gericht schätzen
+                      <div style={{ fontFamily: 'Inter', fontSize: 10, fontWeight: 400, color: 'rgba(250,246,236,0.65)', marginTop: 2 }}>
+                        Nur für diesen Tag, kein Glossar (z.B. Restaurantessen, "Lammspieß mit Reis")
                       </div>
                     </button>
                   </div>
