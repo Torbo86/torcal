@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.72';
+const APP_VERSION = '3.73';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.73', changes: ['Kaffee-Makros im Analyse-Export sichtbar, damit die KI sie nicht als fehlend meldet'] },
   { v: '3.72', changes: ['KI-Suche dritter Knopf: einmaliges Gericht schätzen ohne Glossar (z.B. Restaurantessen)'] },
   { v: '3.71', changes: ['Gerichte mit Zubereitung: optionales Anleitung-Feld, ausklappbar in der Liste'] },
   { v: '3.70', changes: ['KI-Suche zweigeteilt: Einzelnes Lebensmittel ODER Gericht aus Komponenten anlegen'] },
@@ -2303,7 +2304,9 @@ function App() {
             const actLines = dayActs.length
               ? `**Bewegung**\n` + dayActs.map(a => `  - ${a.activityName}: ${a.durationMin} min → +${a.kcal} kcal`).join('\n')
               : '';
-            const coffeeLines = coffeeEntry ? `**Kaffee:** ${coffeeEntry.qty}× Kaffee mit Milch → ${coffeeEntry.kcal} kcal\n` : '';
+            const coffeeLines = coffeeEntry
+              ? `**Kaffee:** ${coffeeEntry.qty}× Kaffee mit Milch → ${coffeeEntry.kcal} kcal (E ${Math.round((coffeeEntry.protein || 0) * 10) / 10}g · K ${Math.round((coffeeEntry.carbs || 0) * 10) / 10}g · F ${Math.round((coffeeEntry.fat || 0) * 10) / 10}g)\n`
+              : '';
 
             let text;
             if (deep) {
@@ -2640,7 +2643,9 @@ function App() {
             }).filter(Boolean).join('\n\n');
             const actLines = dayActs.length
               ? `**Bewegung**\n` + dayActs.map(a => `  - ${a.activityName}: ${a.durationMin} min → +${a.kcal} kcal`).join('\n') : '';
-            const coffeeLines = coffeeEntry ? `**Kaffee:** ${coffeeEntry.qty}× → ${coffeeEntry.kcal} kcal\n` : '';
+            const coffeeLines = coffeeEntry
+              ? `**Kaffee:** ${coffeeEntry.qty}× → ${coffeeEntry.kcal} kcal (E ${Math.round((coffeeEntry.protein || 0) * 10) / 10}g · K ${Math.round((coffeeEntry.carbs || 0) * 10) / 10}g · F ${Math.round((coffeeEntry.fat || 0) * 10) / 10}g)\n`
+              : '';
             let text;
             if (deep) {
               const userInfo = settings
