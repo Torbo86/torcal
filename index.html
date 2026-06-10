@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.75';
+const APP_VERSION = '3.76';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.76', changes: ['Analyse-Export zeigt Mahlzeit-Uhrzeiten und Wasser-Trackings'] },
   { v: '3.75', changes: ['Deep-Analyse kürzer: nur Makros, Timing, Gewicht und Tagesbewertung — keine Rezeptideen mehr'] },
   { v: '3.74', changes: ['Makros-Reparatur in den Einstellungen: alte Einträge mit aktuellen Glossar-Werten neu rechnen', '"Wie gestern" zieht jetzt frische Makros aus dem Glossar', 'EntryEditor zeigt Makro-Vorschau für aktuelle Menge'] },
   { v: '3.73', changes: ['Kaffee-Makros im Analyse-Export sichtbar, damit die KI sie nicht als fehlend meldet'] },
@@ -2300,7 +2301,11 @@ function App() {
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
               if (!items.length) return null;
-              return `**${slot}** (${items.reduce((s,e)=>s+e.kcal,0)} kcal)\n` +
+              const times = items.map(e => e.time).filter(Boolean).sort();
+              const timeStr = times.length > 0
+                ? new Date(times[0]).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+                : '';
+              return `**${slot}**${timeStr ? ` (~${timeStr})` : ''} (${items.reduce((s,e)=>s+e.kcal,0)} kcal)\n` +
                 items.map(e => `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`).join('\n');
             }).filter(Boolean).join('\n\n');
             const actLines = dayActs.length
@@ -2621,6 +2626,8 @@ function App() {
           progressPhotos={progressPhotos}
           onAddProgressPhoto={addProgressPhoto}
           onDeleteProgressPhoto={deleteProgressPhoto}
+          waterLog={waterLog}
+          waterGoal={waterGoal}
           settings={settings}
           apiKey={apiKey}
           selectedDate={selectedDate}
@@ -2656,7 +2663,11 @@ function App() {
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
               if (!items.length) return null;
-              return `**${slot}** (${items.reduce((s,e)=>s+e.kcal,0)} kcal)\n` +
+              const times = items.map(e => e.time).filter(Boolean).sort();
+              const timeStr = times.length > 0
+                ? new Date(times[0]).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+                : '';
+              return `**${slot}**${timeStr ? ` (~${timeStr})` : ''} (${items.reduce((s,e)=>s+e.kcal,0)} kcal)\n` +
                 items.map(e => `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`).join('\n');
             }).filter(Boolean).join('\n\n');
             const actLines = dayActs.length
@@ -2688,7 +2699,11 @@ function App() {
                 }
                 weightBlock += '\n';
               }
-              text = `# Torcal Deep-Analyse — ${date}\n\nBitte analysiere meinen Ernährungstag ausführlich als erfahrener Ernährungsberater.\n\n## Persönliche Daten\n${userInfo}\n\n${weightBlock}## Tagesbilanz\n- Gegessen: ${consumed} kcal\n- Verbrannt: ${burned} kcal Sport\n- Netto: ${consumed - burned} kcal von ${dailyTarget} kcal\n- Verbleibend: ${dailyTarget + burned - consumed} kcal\n- Makros: Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n## Mahlzeiten\n${slotLines || 'nichts'}\n\n${coffeeLines ? '## Getränke\n' + coffeeLines + '\n' : ''}${actLines ? '## Sport\n' + actLines + '\n\n' : ''}## Hinweis zu den Daten\nManche Eintraege wurden nur grob oder ohne Makros getrackt. Wenn Makros fehlen oder unrealistisch niedrig wirken (z.B. 0-1 g bei einer echten Mahlzeit), schaetze realistische Werte aus Name und Kalorien und rechne damit. Weise kurz darauf hin, wo du geschaetzt hast.\n\n## Gewünschte Analyse\n1. Makro-Verteilung bewerten\n2. Mahlzeiten-Timing bewerten\n3. Gewichtsverlauf bewerten — auf Kurs?\n4. Was war gut heute, und was kann morgen konkret besser werden?`;
+              const waterDay = waterLog[date] || 0;
+              const waterBlock = waterDay > 0
+                ? `## Wasser\n${waterDay} von ${waterGoal} Gläsern (~${(waterDay * 0.25).toFixed(1).replace('.', ',')} L)\n\n`
+                : '';
+              text = `# Torcal Deep-Analyse — ${date}\n\nBitte analysiere meinen Ernährungstag ausführlich als erfahrener Ernährungsberater.\n\n## Persönliche Daten\n${userInfo}\n\n${weightBlock}## Tagesbilanz\n- Gegessen: ${consumed} kcal\n- Verbrannt: ${burned} kcal Sport\n- Netto: ${consumed - burned} kcal von ${dailyTarget} kcal\n- Verbleibend: ${dailyTarget + burned - consumed} kcal\n- Makros: Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n## Mahlzeiten\n${slotLines || 'nichts'}\n\n${coffeeLines ? '## Getränke\n' + coffeeLines + '\n' : ''}${waterBlock}${actLines ? '## Sport\n' + actLines + '\n\n' : ''}## Hinweis zu den Daten\nManche Eintraege wurden nur grob oder ohne Makros getrackt. Wenn Makros fehlen oder unrealistisch niedrig wirken (z.B. 0-1 g bei einer echten Mahlzeit), schaetze realistische Werte aus Name und Kalorien und rechne damit. Weise kurz darauf hin, wo du geschaetzt hast.\n\n## Gewünschte Analyse\n1. Makro-Verteilung bewerten\n2. Mahlzeiten-Timing bewerten\n3. Gewichtsverlauf bewerten — auf Kurs?\n4. Was war gut heute, und was kann morgen konkret besser werden?`;
             } else {
               text = `# Torcal Tagesexport — ${date}\n\n**Tagesziel:** ${dailyTarget} kcal\n**Gegessen:** ${consumed} kcal\n**Verbrannt:** ${burned} kcal\n**Netto:** ${consumed - burned} kcal\n**Verbleibend:** ${dailyTarget + burned - consumed} kcal\n\n**Makros:** Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n${coffeeLines}${slotLines}${actLines ? '\n\n' + actLines : ''}`;
             }
@@ -7194,7 +7209,7 @@ function FoodEditor({ food, onSave, onDelete, onCancel, apiKey = '' }) {
 }
 
 // === Stats ===
-function Stats({ entries, activityEntries = [], glossary = [], target, weights = [], progressPhotos = [], onAddProgressPhoto, onDeleteProgressPhoto, settings, apiKey = '', selectedDate, setSelectedDate, savedAnalyses = [], onSaveAnalysis, onDeleteAnalysis, onAddWeight, onDeleteWeight, onBack, onExportDay, onExportRange }) {
+function Stats({ entries, activityEntries = [], glossary = [], target, weights = [], progressPhotos = [], onAddProgressPhoto, onDeleteProgressPhoto, waterLog = {}, waterGoal = 8, settings, apiKey = '', selectedDate, setSelectedDate, savedAnalyses = [], onSaveAnalysis, onDeleteAnalysis, onAddWeight, onDeleteWeight, onBack, onExportDay, onExportRange }) {
   const [range, setRange] = useState('week'); // week | month
   const [showAddWeight, setShowAddWeight] = useState(false);
   const [newWeight, setNewWeight] = useState('');
