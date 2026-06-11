@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.76';
+const APP_VERSION = '3.77';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.77', changes: ['Gericht-Eintragen mit Name-Fallback: findet Lebensmittel auch bei veralteten IDs, damit Makros nicht verloren gehen'] },
   { v: '3.76', changes: ['Analyse-Export zeigt Mahlzeit-Uhrzeiten und Wasser-Trackings'] },
   { v: '3.75', changes: ['Deep-Analyse kürzer: nur Makros, Timing, Gewicht und Tagesbewertung — keine Rezeptideen mehr'] },
   { v: '3.74', changes: ['Makros-Reparatur in den Einstellungen: alte Einträge mit aktuellen Glossar-Werten neu rechnen', '"Wie gestern" zieht jetzt frische Makros aus dem Glossar', 'EntryEditor zeigt Makro-Vorschau für aktuelle Menge'] },
@@ -4902,7 +4903,11 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
   useEffect(() => {
     if (pendingDishItems && pendingDishItems.length) {
       const items = pendingDishItems.map(it => {
-        const food = glossary.find(g => g.id === it.foodId);
+        // Erst per foodId, dann per Name (falls ID veraltet ist)
+        let food = glossary.find(g => g.id === it.foodId);
+        if (!food && it.foodName) {
+          food = glossary.find(g => g.name.toLowerCase().trim() === it.foodName.toLowerCase().trim());
+        }
         if (food) {
           return {
             foodId: food.id,
@@ -6437,7 +6442,12 @@ function Dishes({ dishes, glossary, onChange, onUseDish, onImportRecipe, onBack 
                   // Picker öffnen, default: 1 Portion (also nur für dich)
                   setPortionPicker({ dish: d, portions: 1 });
                 } else {
-                  onUseDish(d.items);
+                  // Items mit foodName anreichern, damit der Empfänger ggf. per Name auflösen kann
+                  const enriched = d.items.map(it => {
+                    const f = glossary.find(g => g.id === it.foodId);
+                    return { ...it, foodName: f ? f.name : null };
+                  });
+                  onUseDish(enriched);
                 }
               }}
               style={{
@@ -6495,10 +6505,14 @@ function Dishes({ dishes, glossary, onChange, onUseDish, onImportRecipe, onBack 
                 >Abbrechen</button>
                 <button
                   onClick={() => {
-                    const scaledItems = dish.items.map(it => ({
-                      ...it,
-                      qty: Math.round(it.qty * factor * 10) / 10,
-                    }));
+                    const scaledItems = dish.items.map(it => {
+                      const f = glossary.find(g => g.id === it.foodId);
+                      return {
+                        ...it,
+                        qty: Math.round(it.qty * factor * 10) / 10,
+                        foodName: f ? f.name : null,
+                      };
+                    });
                     onUseDish(scaledItems);
                     setPortionPicker(null);
                   }}
