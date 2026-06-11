@@ -131,11 +131,15 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.78';
+const APP_VERSION = '3.79';
+// Standard-Essenszeiten pro Slot: werden im Analyse-Export verwendet,
+// solange ein Eintrag keine eigene "Gegessen um"-Zeit (eatenAt) hat.
+const SLOT_DEFAULT_TIMES = { 'Frühstück': '09:00', 'Mittag': '12:30', 'Snack': '15:30', 'Abend': '19:00' };
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.79', changes: ['Mahlzeit-Zeiten im Analyse-Export sind jetzt Essenszeiten statt Eintragszeiten: Slot-Standardzeiten als Basis, pro Eintrag im Editor überschreibbar ("Gegessen um")'] },
   { v: '3.78', changes: ['JSON-Import bei Hinzufügen: Mahlzeit-Blöcke, einzelne Lebensmittel und Rezept-JSON direkt aus dem Chat einfügen'] },
   { v: '3.77', changes: ['Gericht-Eintragen mit Name-Fallback: findet Lebensmittel auch bei veralteten IDs, damit Makros nicht verloren gehen'] },
   { v: '3.76', changes: ['Analyse-Export zeigt Mahlzeit-Uhrzeiten und Wasser-Trackings'] },
@@ -2303,10 +2307,9 @@ function App() {
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
               if (!items.length) return null;
-              const times = items.map(e => e.time).filter(Boolean).sort();
-              const timeStr = times.length > 0
-                ? new Date(times[0]).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-                : '';
+              // Essenszeit statt Eintragszeit: eatenAt vom Eintrag, sonst Slot-Standardzeit
+              const eatenTimes = items.map(e => e.eatenAt).filter(Boolean).sort();
+              const timeStr = eatenTimes.length > 0 ? eatenTimes[0] : (SLOT_DEFAULT_TIMES[slot] || '');
               return `**${slot}**${timeStr ? ` (~${timeStr})` : ''} (${items.reduce((s,e)=>s+e.kcal,0)} kcal)\n` +
                 items.map(e => `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`).join('\n');
             }).filter(Boolean).join('\n\n');
@@ -2665,10 +2668,9 @@ function App() {
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
               if (!items.length) return null;
-              const times = items.map(e => e.time).filter(Boolean).sort();
-              const timeStr = times.length > 0
-                ? new Date(times[0]).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-                : '';
+              // Essenszeit statt Eintragszeit: eatenAt vom Eintrag, sonst Slot-Standardzeit
+              const eatenTimes = items.map(e => e.eatenAt).filter(Boolean).sort();
+              const timeStr = eatenTimes.length > 0 ? eatenTimes[0] : (SLOT_DEFAULT_TIMES[slot] || '');
               return `**${slot}**${timeStr ? ` (~${timeStr})` : ''} (${items.reduce((s,e)=>s+e.kcal,0)} kcal)\n` +
                 items.map(e => `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`).join('\n');
             }).filter(Boolean).join('\n\n');
@@ -3236,6 +3238,14 @@ function EntryEditor({ entry, glossary, onSave, onDelete, onCancel }) {
   const [qty, setQty] = useState(entry.qty);
   const [unit, setUnit] = useState(entry.unit);
   const [slot, setSlot] = useState(entry.slot);
+  // Gegessen um: gespeicherte Zeit oder Slot-Standardzeit als Vorgabe
+  const [eatenAt, setEatenAt] = useState(entry.eatenAt || SLOT_DEFAULT_TIMES[entry.slot] || '12:00');
+  const [eatenAtTouched, setEatenAtTouched] = useState(!!entry.eatenAt);
+  // Slot-Wechsel: solange die Zeit nicht angefasst wurde, auf neue Slot-Standardzeit springen
+  const changeSlot = (newSlot) => {
+    setSlot(newSlot);
+    if (!eatenAtTouched) setEatenAt(SLOT_DEFAULT_TIMES[newSlot] || '12:00');
+  };
 
   // Aus Glossar die kcal/Makros + Einheiten holen (Fallback: nur die im Eintrag verwendete Einheit)
   const food = glossary.find(g => g.id === entry.foodId);
@@ -3255,6 +3265,8 @@ function EntryEditor({ entry, glossary, onSave, onDelete, onCancel }) {
     onSave({
       ...entry,
       qty, unit, slot,
+      // Nur speichern, wenn bewusst gesetzt — sonst gilt weiter die Slot-Standardzeit
+      ...(eatenAtTouched ? { eatenAt } : {}),
       kcal: newKcal,
       protein: newProtein, carbs: newCarbs, fat: newFat,
     });
@@ -3309,11 +3321,25 @@ function EntryEditor({ entry, glossary, onSave, onDelete, onCancel }) {
           </div>
         </div>
 
-        <Field label="Mahlzeit">
-          <select value={slot} onChange={e => setSlot(e.target.value)} style={styles.input}>
-            {['Frühstück', 'Mittag', 'Snack', 'Abend'].map(s => <option key={s}>{s}</option>)}
-          </select>
-        </Field>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <Field label="Mahlzeit">
+              <select value={slot} onChange={e => changeSlot(e.target.value)} style={styles.input}>
+                {['Frühstück', 'Mittag', 'Snack', 'Abend'].map(s => <option key={s}>{s}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label="Gegessen um">
+              <input
+                type="time"
+                value={eatenAt}
+                onChange={e => { setEatenAt(e.target.value); setEatenAtTouched(true); }}
+                style={styles.input}
+              />
+            </Field>
+          </div>
+        </div>
 
         <div style={{ background: 'rgba(250,246,236,0.08)', padding: '12px 16px', borderRadius: 8, marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.7)', textTransform: 'uppercase', letterSpacing: 1 }}>Kalorien</span>
