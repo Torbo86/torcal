@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.77';
+const APP_VERSION = '3.78';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.78', changes: ['JSON-Import bei Hinzufügen: Mahlzeit-Blöcke, einzelne Lebensmittel und Rezept-JSON direkt aus dem Chat einfügen'] },
   { v: '3.77', changes: ['Gericht-Eintragen mit Name-Fallback: findet Lebensmittel auch bei veralteten IDs, damit Makros nicht verloren gehen'] },
   { v: '3.76', changes: ['Analyse-Export zeigt Mahlzeit-Uhrzeiten und Wasser-Trackings'] },
   { v: '3.75', changes: ['Deep-Analyse kürzer: nur Makros, Timing, Gewicht und Tagesbewertung — keine Rezeptideen mehr'] },
@@ -4773,6 +4774,9 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
   // Chat-Import: Eingabefeld für JSON-Antwort + Vorschau
   const [chatImportText, setChatImportText] = useState('');
   const [showChatImport, setShowChatImport] = useState(false);
+  // Universeller JSON-Import: Mahlzeit-Blöcke, Einzel-Lebensmittel, Rezept-JSON
+  const [jsonImportText, setJsonImportText] = useState('');
+  const [showJsonImport, setShowJsonImport] = useState(false);
   const [kiSearching, setKiSearching] = useState(false);
   const [kiSearchError, setKiSearchError] = useState('');
   const [parsed, setParsed] = useState([]);
@@ -4883,6 +4887,8 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
     setDishSearch('');
     setPhotoError(null);
     setPhotoPreview(null);
+    setShowJsonImport(false);
+    setJsonImportText('');
     if (newMode !== 'photo') setPhotoItems([]);
     if (newMode === 'text') {
       setSearchResults([...glossary].sort((a, b) => a.name.localeCompare(b.name, 'de')));
@@ -5051,6 +5057,132 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
     } catch { return null; }
   };
   const chatImportParsed = parseChatImport(chatImportText);
+
+  // Universeller JSON-Import: erkennt drei Formate und mappt auf parsed-Items.
+  // 1) Einzel-Lebensmittel: { name, kcalPer100g, protein, carbs, fat, units }
+  // 2) Mahlzeit-Block: { eintraege/items: [{ name, gramm/menge, kcal, protein(_g), ... }] } oder Top-Level-Array
+  // 3) Rezept-JSON: { dish: { ingredients }, newFoods } — Zutaten werden als Einträge übernommen
+  const parseJsonImportBlock = (raw) => {
+    if (!raw || !raw.trim()) return null;
+    let text = raw.trim();
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    if (!text.startsWith('{') && !text.startsWith('[')) {
+      const m = text.match(/[\{\[][\s\S]*[\}\]]/);
+      if (m) text = m[0];
+    }
+    let obj;
+    try { obj = JSON.parse(text); } catch { return null; }
+    if (!obj || typeof obj !== 'object') return null;
+
+    const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    // Gramm aus "menge"-Strings ziehen, z.B. "450 g" oder "1 ganze Pizza (ca. 450 g)"
+    const gramsFrom = (it) => {
+      const direct = it.gramm ?? it.grams ?? it.menge_g ?? it.g;
+      if (direct != null && !isNaN(parseFloat(direct))) return parseFloat(direct);
+      if (typeof it.menge === 'string') {
+        const m = it.menge.match(/(\d+(?:[.,]\d+)?)\s*(?:g|gramm)\b/i);
+        if (m) return parseFloat(m[1].replace(',', '.'));
+      }
+      return null;
+    };
+    const findFood = (name) => glossary.find(g => g.name.toLowerCase().trim() === String(name).toLowerCase().trim());
+
+    // Ein Item aus einem Mahlzeit-Block in ein parsed-Item übersetzen
+    const mealItem = (it) => {
+      if (!it || !it.name) return null;
+      const kcal = num(it.kcal ?? it.calories);
+      const protein = num(it.protein_g ?? it.protein ?? it.eiweiss_g ?? it.eiweiss);
+      const carbs = num(it.kohlenhydrate_g ?? it.carbs_g ?? it.carbs ?? it.kohlenhydrate);
+      const fat = num(it.fett_g ?? it.fat_g ?? it.fat ?? it.fett);
+      const grams = gramsFrom(it);
+      const existing = findFood(it.name);
+      if (existing && grams) {
+        // Bekanntes Lebensmittel: Glossar-Werte nutzen, nur Menge übernehmen
+        return {
+          foodId: existing.id, foodName: existing.name, qty: grams, unit: 'g',
+          kcalPer100g: existing.kcalPer100g, protein: existing.protein || 0,
+          carbs: existing.carbs || 0, fat: existing.fat || 0,
+          units: existing.units, isNew: false,
+        };
+      }
+      if (grams && grams > 0 && kcal > 0) {
+        // Unbekannt, aber Gramm vorhanden: per-100g rechnen, kommt ins Glossar
+        const f = 100 / grams;
+        return {
+          foodId: null, foodName: String(it.name), qty: grams, unit: 'g',
+          kcalPer100g: Math.round(kcal * f), protein: Math.round(protein * f * 10) / 10,
+          carbs: Math.round(carbs * f * 10) / 10, fat: Math.round(fat * f * 10) / 10,
+          units: { g: 1 }, isNew: true,
+        };
+      }
+      // Keine Gramm-Angabe: als manueller Eintrag (kcal absolut, kein Glossar)
+      return {
+        foodId: null, foodName: String(it.name), qty: 1, unit: 'Portion',
+        kcalPer100g: kcal, protein, carbs, fat,
+        units: { 'Portion': 100, 'g': 1 }, isNew: true, isManual: true,
+      };
+    };
+
+    // Format 3: Rezept-JSON → Zutaten als Einträge (Gericht selbst über Rezept-Import anlegen)
+    if (obj.dish && Array.isArray(obj.dish.ingredients)) {
+      const foodInfo = {};
+      (obj.newFoods || []).forEach(f => {
+        if (f && f.name) foodInfo[String(f.name).toLowerCase().trim()] = f;
+      });
+      const items = obj.dish.ingredients.map(ing => {
+        if (!ing || !ing.name) return null;
+        const existing = findFood(ing.name);
+        const grams = num(ing.grams ?? ing.gramm ?? ing.qty);
+        if (existing) {
+          return {
+            foodId: existing.id, foodName: existing.name, qty: grams || 100, unit: 'g',
+            kcalPer100g: existing.kcalPer100g, protein: existing.protein || 0,
+            carbs: existing.carbs || 0, fat: existing.fat || 0,
+            units: existing.units, isNew: false,
+          };
+        }
+        const nf = foodInfo[String(ing.name).toLowerCase().trim()];
+        if (!nf) return null;
+        return {
+          foodId: null, foodName: String(ing.name), qty: grams || 100, unit: 'g',
+          kcalPer100g: num(nf.kcalPer100g ?? nf.kcal), protein: num(nf.protein),
+          carbs: num(nf.carbs), fat: num(nf.fat),
+          units: nf.units && typeof nf.units === 'object' ? nf.units : { g: 1 }, isNew: true,
+        };
+      }).filter(Boolean);
+      if (items.length === 0) return null;
+      return { items, note: 'Rezept-JSON erkannt: Zutaten werden als Einträge übernommen. Als Gericht speichern geht über Gerichte → Rezept-Import.' };
+    }
+
+    // Format 1: Einzel-Lebensmittel mit kcalPer100g
+    if (obj.name && typeof obj.kcalPer100g === 'number') {
+      const single = parseChatImport(text);
+      if (!single) return null;
+      return {
+        items: [{
+          foodId: null, foodName: single.name, qty: 100, unit: 'g',
+          kcalPer100g: single.kcalPer100g, protein: single.protein,
+          carbs: single.carbs, fat: single.fat, units: single.units, isNew: true,
+        }],
+        note: null,
+      };
+    }
+
+    // Format 2: Mahlzeit-Block (eintraege/items/Array)
+    const list = Array.isArray(obj) ? obj : (obj.eintraege || obj.items || obj.entries || null);
+    if (Array.isArray(list) && list.length > 0) {
+      const items = list.map(mealItem).filter(Boolean);
+      if (items.length === 0) return null;
+      return { items, note: null };
+    }
+    // Einzelnes Item mit kcal-Gesamtwert (z.B. { name, menge, kcal, ... })
+    if (obj.name && (obj.kcal != null || obj.calories != null)) {
+      const item = mealItem(obj);
+      return item ? { items: [item], note: null } : null;
+    }
+    return null;
+  };
+  const jsonImportParsed = parseJsonImportBlock(jsonImportText);
 
   const onSearchChange = (q) => {
     setTextInput(q);
@@ -5536,6 +5668,76 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
               <button style={styles.secondary} onClick={handleTextSubmit}>
                 Als Satz parsen (z.B. "300g Quark")
               </button>
+
+              {/* Universeller JSON-Import aus dem Chat */}
+              {!showJsonImport && (
+                <button
+                  onClick={() => setShowJsonImport(true)}
+                  style={{ ...styles.secondary, marginTop: 6 }}
+                >{'{ }'} JSON aus Chat einfügen</button>
+              )}
+              {showJsonImport && (
+                <div style={{ marginTop: 8, padding: 12, background: 'rgba(250,246,236,0.05)', border: '1px solid rgba(250,246,236,0.12)', borderRadius: 10 }}>
+                  <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.55)', marginBottom: 8 }}>
+                    JSON-Import
+                  </div>
+                  <textarea
+                    value={jsonImportText}
+                    onChange={e => setJsonImportText(e.target.value)}
+                    placeholder='JSON-Block hier einfügen (Mahlzeit, Lebensmittel oder Rezept)...'
+                    rows={6}
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(0,0,0,0.25)', color: '#FAF6EC', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 6, padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, outline: 'none', resize: 'vertical' }}
+                  />
+                  {jsonImportText.trim() && (
+                    <div style={{ marginTop: 6 }}>
+                      {jsonImportParsed ? (
+                        <div style={{ background: 'rgba(144,200,168,0.1)', border: '1px solid rgba(144,200,168,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 12, color: '#FAF6EC' }}>
+                          {jsonImportParsed.items.map((it, i) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '2px 0' }}>
+                              <span style={{ fontWeight: 600 }}>{it.foodName}</span>
+                              <span style={{ fontSize: 11, color: 'rgba(250,246,236,0.75)', whiteSpace: 'nowrap' }}>
+                                {it.isManual
+                                  ? `${Math.round(it.kcalPer100g)} kcal`
+                                  : `${it.qty}${it.unit === 'g' ? ' g' : ' ' + it.unit} · ${Math.round(it.kcalPer100g * (it.units[it.unit] || 1) * it.qty / 100)} kcal`}
+                              </span>
+                            </div>
+                          ))}
+                          {jsonImportParsed.items.some(it => it.isNew && !it.isManual) && (
+                            <div style={{ fontSize: 11, color: '#90C8A8', marginTop: 4 }}>
+                              Neue Lebensmittel werden beim Eintragen im Glossar angelegt.
+                            </div>
+                          )}
+                          {jsonImportParsed.note && (
+                            <div style={{ fontSize: 11, color: 'rgba(250,246,236,0.65)', marginTop: 4 }}>
+                              {jsonImportParsed.note}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ background: 'rgba(232,168,124,0.1)', border: '1px solid rgba(232,168,124,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 11, color: '#E8A87C' }}>
+                          Kein gültiges JSON erkannt. Unterstützt: Mahlzeit-Block ({'{ eintraege: [...] }'}), Einzel-Lebensmittel ({'{ name, kcalPer100g, ... }'}) und Rezept-JSON ({'{ dish, newFoods }'}).
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    {jsonImportParsed && (
+                      <button
+                        onClick={() => {
+                          setParsed(prev => [...prev, ...jsonImportParsed.items]);
+                          setJsonImportText('');
+                          setShowJsonImport(false);
+                        }}
+                        style={{ flex: 1, background: '#1A5340', border: '1px solid #90C8A8', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC' }}
+                      >In Vorschau übernehmen</button>
+                    )}
+                    <button
+                      onClick={() => { setShowJsonImport(false); setJsonImportText(''); }}
+                      style={{ flex: jsonImportParsed ? 0 : 1, minWidth: 90, background: 'transparent', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.7)' }}
+                    >Abbrechen</button>
+                  </div>
+                </div>
+              )}
 
               {/* Chat-Workflow als Fallback ohne API-Key */}
               {!apiKey && (
