@@ -132,14 +132,11 @@
     
 // === Hilfsfunktionen ===
 const APP_VERSION = '3.79';
-// Standard-Essenszeiten pro Slot: werden im Analyse-Export verwendet,
-// solange ein Eintrag keine eigene "Gegessen um"-Zeit (eatenAt) hat.
-const SLOT_DEFAULT_TIMES = { 'Frühstück': '09:00', 'Mittag': '12:30', 'Snack': '15:30', 'Abend': '19:00' };
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
-  { v: '3.79', changes: ['Mahlzeit-Zeiten im Analyse-Export sind jetzt Essenszeiten statt Eintragszeiten: Slot-Standardzeiten als Basis, pro Eintrag im Editor überschreibbar ("Gegessen um")'] },
+  { v: '3.79', changes: ['JSON-Import-Knopf immer sichtbar beim Hinzufügen (nicht mehr nur bei leerer Suche)', 'Export: Alkohol-Einträge zeigen Makros und reine Alkohol-kcal, Hinweis für die Analyse ergänzt'] },
   { v: '3.78', changes: ['JSON-Import bei Hinzufügen: Mahlzeit-Blöcke, einzelne Lebensmittel und Rezept-JSON direkt aus dem Chat einfügen'] },
   { v: '3.77', changes: ['Gericht-Eintragen mit Name-Fallback: findet Lebensmittel auch bei veralteten IDs, damit Makros nicht verloren gehen'] },
   { v: '3.76', changes: ['Analyse-Export zeigt Mahlzeit-Uhrzeiten und Wasser-Trackings'] },
@@ -2307,11 +2304,21 @@ function App() {
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
               if (!items.length) return null;
-              // Essenszeit statt Eintragszeit: eatenAt vom Eintrag, sonst Slot-Standardzeit
-              const eatenTimes = items.map(e => e.eatenAt).filter(Boolean).sort();
-              const timeStr = eatenTimes.length > 0 ? eatenTimes[0] : (SLOT_DEFAULT_TIMES[slot] || '');
+              const times = items.map(e => e.time).filter(Boolean).sort();
+              const timeStr = times.length > 0
+                ? new Date(times[0]).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+                : '';
               return `**${slot}**${timeStr ? ` (~${timeStr})` : ''} (${items.reduce((s,e)=>s+e.kcal,0)} kcal)\n` +
-                items.map(e => `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`).join('\n');
+                items.map(e => {
+                  const base = `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`;
+                  if (e.isAlcohol) {
+                    const p = Math.round((e.protein || 0) * 10) / 10;
+                    const c = Math.round((e.carbs || 0) * 10) / 10;
+                    const eth = Math.max(0, Math.round(e.kcal - p * 4 - c * 4));
+                    return base + ` (E ${p}g · K ${c}g · F 0g, davon ~${eth} kcal reiner Alkohol)`;
+                  }
+                  return base;
+                }).join('\n');
             }).filter(Boolean).join('\n\n');
             const actLines = dayActs.length
               ? `**Bewegung**\n` + dayActs.map(a => `  - ${a.activityName}: ${a.durationMin} min → +${a.kcal} kcal`).join('\n')
@@ -2366,7 +2373,7 @@ function App() {
                 (coffeeLines ? `## Getränke\n${coffeeLines}\n` : '') +
                 (actLines ? `## Sport\n${actLines}\n\n` : '') +
                 `## Hinweis zu den Daten\n` +
-                `Manche Einträge wurden nur grob oder ohne Makros getrackt. Wenn bei einem Gericht die Makros (Eiweiß/KH/Fett) fehlen oder unrealistisch niedrig wirken (z.B. 0-1 g bei einer echten Mahlzeit), schätze realistische Werte anhand des Namens und der Kalorien und rechne damit. Weise in der Analyse kurz darauf hin, wo du geschätzt hast.\n\n` +
+                `Manche Einträge wurden nur grob oder ohne Makros getrackt. Wenn bei einem Gericht die Makros (Eiweiß/KH/Fett) fehlen oder unrealistisch niedrig wirken (z.B. 0-1 g bei einer echten Mahlzeit), schätze realistische Werte anhand des Namens und der Kalorien und rechne damit. Weise in der Analyse kurz darauf hin, wo du geschätzt hast. Bei Alkohol-Einträgen stammt ein Großteil der Kalorien aus reinem Alkohol (Ethanol), der in keiner Makrospalte auftaucht — das ist korrekt so und keine fehlenden Makros.\n\n` +
                 `## Gewünschte Analyse\n` +
                 `1. Bewerte die Makro-Verteilung (Eiweiß besonders wichtig für mein Ziel)\n` +
                 `2. Bewerte die Mahlzeiten-Verteilung über den Tag\n` +
@@ -2668,11 +2675,21 @@ function App() {
             const slotLines = slots.map(slot => {
               const items = dayEntries.filter(e => e.slot === slot);
               if (!items.length) return null;
-              // Essenszeit statt Eintragszeit: eatenAt vom Eintrag, sonst Slot-Standardzeit
-              const eatenTimes = items.map(e => e.eatenAt).filter(Boolean).sort();
-              const timeStr = eatenTimes.length > 0 ? eatenTimes[0] : (SLOT_DEFAULT_TIMES[slot] || '');
+              const times = items.map(e => e.time).filter(Boolean).sort();
+              const timeStr = times.length > 0
+                ? new Date(times[0]).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+                : '';
               return `**${slot}**${timeStr ? ` (~${timeStr})` : ''} (${items.reduce((s,e)=>s+e.kcal,0)} kcal)\n` +
-                items.map(e => `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`).join('\n');
+                items.map(e => {
+                  const base = `  - ${e.foodName}: ${e.qty}${e.unit} → ${e.kcal} kcal`;
+                  if (e.isAlcohol) {
+                    const p = Math.round((e.protein || 0) * 10) / 10;
+                    const c = Math.round((e.carbs || 0) * 10) / 10;
+                    const eth = Math.max(0, Math.round(e.kcal - p * 4 - c * 4));
+                    return base + ` (E ${p}g · K ${c}g · F 0g, davon ~${eth} kcal reiner Alkohol)`;
+                  }
+                  return base;
+                }).join('\n');
             }).filter(Boolean).join('\n\n');
             const actLines = dayActs.length
               ? `**Bewegung**\n` + dayActs.map(a => `  - ${a.activityName}: ${a.durationMin} min → +${a.kcal} kcal`).join('\n') : '';
@@ -2707,7 +2724,7 @@ function App() {
               const waterBlock = waterDay > 0
                 ? `## Wasser\n${waterDay} von ${waterGoal} Gläsern (~${(waterDay * 0.25).toFixed(1).replace('.', ',')} L)\n\n`
                 : '';
-              text = `# Torcal Deep-Analyse — ${date}\n\nBitte analysiere meinen Ernährungstag ausführlich als erfahrener Ernährungsberater.\n\n## Persönliche Daten\n${userInfo}\n\n${weightBlock}## Tagesbilanz\n- Gegessen: ${consumed} kcal\n- Verbrannt: ${burned} kcal Sport\n- Netto: ${consumed - burned} kcal von ${dailyTarget} kcal\n- Verbleibend: ${dailyTarget + burned - consumed} kcal\n- Makros: Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n## Mahlzeiten\n${slotLines || 'nichts'}\n\n${coffeeLines ? '## Getränke\n' + coffeeLines + '\n' : ''}${waterBlock}${actLines ? '## Sport\n' + actLines + '\n\n' : ''}## Hinweis zu den Daten\nManche Eintraege wurden nur grob oder ohne Makros getrackt. Wenn Makros fehlen oder unrealistisch niedrig wirken (z.B. 0-1 g bei einer echten Mahlzeit), schaetze realistische Werte aus Name und Kalorien und rechne damit. Weise kurz darauf hin, wo du geschaetzt hast.\n\n## Gewünschte Analyse\n1. Makro-Verteilung bewerten\n2. Mahlzeiten-Timing bewerten\n3. Gewichtsverlauf bewerten — auf Kurs?\n4. Was war gut heute, und was kann morgen konkret besser werden?`;
+              text = `# Torcal Deep-Analyse — ${date}\n\nBitte analysiere meinen Ernährungstag ausführlich als erfahrener Ernährungsberater.\n\n## Persönliche Daten\n${userInfo}\n\n${weightBlock}## Tagesbilanz\n- Gegessen: ${consumed} kcal\n- Verbrannt: ${burned} kcal Sport\n- Netto: ${consumed - burned} kcal von ${dailyTarget} kcal\n- Verbleibend: ${dailyTarget + burned - consumed} kcal\n- Makros: Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n## Mahlzeiten\n${slotLines || 'nichts'}\n\n${coffeeLines ? '## Getränke\n' + coffeeLines + '\n' : ''}${waterBlock}${actLines ? '## Sport\n' + actLines + '\n\n' : ''}## Hinweis zu den Daten\nManche Eintraege wurden nur grob oder ohne Makros getrackt. Wenn Makros fehlen oder unrealistisch niedrig wirken (z.B. 0-1 g bei einer echten Mahlzeit), schaetze realistische Werte aus Name und Kalorien und rechne damit. Weise kurz darauf hin, wo du geschaetzt hast. Bei Alkohol-Eintraegen stammt ein Grossteil der Kalorien aus reinem Alkohol (Ethanol), der in keiner Makrospalte auftaucht — das ist korrekt so und keine fehlenden Makros.\n\n## Gewünschte Analyse\n1. Makro-Verteilung bewerten\n2. Mahlzeiten-Timing bewerten\n3. Gewichtsverlauf bewerten — auf Kurs?\n4. Was war gut heute, und was kann morgen konkret besser werden?`;
             } else {
               text = `# Torcal Tagesexport — ${date}\n\n**Tagesziel:** ${dailyTarget} kcal\n**Gegessen:** ${consumed} kcal\n**Verbrannt:** ${burned} kcal\n**Netto:** ${consumed - burned} kcal\n**Verbleibend:** ${dailyTarget + burned - consumed} kcal\n\n**Makros:** Eiweiß ${Math.round(protein)}g · KH ${Math.round(carbs)}g · Fett ${Math.round(fat)}g\n\n${coffeeLines}${slotLines}${actLines ? '\n\n' + actLines : ''}`;
             }
@@ -3238,14 +3255,6 @@ function EntryEditor({ entry, glossary, onSave, onDelete, onCancel }) {
   const [qty, setQty] = useState(entry.qty);
   const [unit, setUnit] = useState(entry.unit);
   const [slot, setSlot] = useState(entry.slot);
-  // Gegessen um: gespeicherte Zeit oder Slot-Standardzeit als Vorgabe
-  const [eatenAt, setEatenAt] = useState(entry.eatenAt || SLOT_DEFAULT_TIMES[entry.slot] || '12:00');
-  const [eatenAtTouched, setEatenAtTouched] = useState(!!entry.eatenAt);
-  // Slot-Wechsel: solange die Zeit nicht angefasst wurde, auf neue Slot-Standardzeit springen
-  const changeSlot = (newSlot) => {
-    setSlot(newSlot);
-    if (!eatenAtTouched) setEatenAt(SLOT_DEFAULT_TIMES[newSlot] || '12:00');
-  };
 
   // Aus Glossar die kcal/Makros + Einheiten holen (Fallback: nur die im Eintrag verwendete Einheit)
   const food = glossary.find(g => g.id === entry.foodId);
@@ -3265,8 +3274,6 @@ function EntryEditor({ entry, glossary, onSave, onDelete, onCancel }) {
     onSave({
       ...entry,
       qty, unit, slot,
-      // Nur speichern, wenn bewusst gesetzt — sonst gilt weiter die Slot-Standardzeit
-      ...(eatenAtTouched ? { eatenAt } : {}),
       kcal: newKcal,
       protein: newProtein, carbs: newCarbs, fat: newFat,
     });
@@ -3321,25 +3328,11 @@ function EntryEditor({ entry, glossary, onSave, onDelete, onCancel }) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <Field label="Mahlzeit">
-              <select value={slot} onChange={e => changeSlot(e.target.value)} style={styles.input}>
-                {['Frühstück', 'Mittag', 'Snack', 'Abend'].map(s => <option key={s}>{s}</option>)}
-              </select>
-            </Field>
-          </div>
-          <div style={{ flex: 1 }}>
-            <Field label="Gegessen um">
-              <input
-                type="time"
-                value={eatenAt}
-                onChange={e => { setEatenAt(e.target.value); setEatenAtTouched(true); }}
-                style={styles.input}
-              />
-            </Field>
-          </div>
-        </div>
+        <Field label="Mahlzeit">
+          <select value={slot} onChange={e => setSlot(e.target.value)} style={styles.input}>
+            {['Frühstück', 'Mittag', 'Snack', 'Abend'].map(s => <option key={s}>{s}</option>)}
+          </select>
+        </Field>
 
         <div style={{ background: 'rgba(250,246,236,0.08)', padding: '12px 16px', borderRadius: 8, marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(250,246,236,0.7)', textTransform: 'uppercase', letterSpacing: 1 }}>Kalorien</span>
@@ -5695,76 +5688,6 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
                 Als Satz parsen (z.B. "300g Quark")
               </button>
 
-              {/* Universeller JSON-Import aus dem Chat */}
-              {!showJsonImport && (
-                <button
-                  onClick={() => setShowJsonImport(true)}
-                  style={{ ...styles.secondary, marginTop: 6 }}
-                >{'{ }'} JSON aus Chat einfügen</button>
-              )}
-              {showJsonImport && (
-                <div style={{ marginTop: 8, padding: 12, background: 'rgba(250,246,236,0.05)', border: '1px solid rgba(250,246,236,0.12)', borderRadius: 10 }}>
-                  <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.55)', marginBottom: 8 }}>
-                    JSON-Import
-                  </div>
-                  <textarea
-                    value={jsonImportText}
-                    onChange={e => setJsonImportText(e.target.value)}
-                    placeholder='JSON-Block hier einfügen (Mahlzeit, Lebensmittel oder Rezept)...'
-                    rows={6}
-                    style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(0,0,0,0.25)', color: '#FAF6EC', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 6, padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, outline: 'none', resize: 'vertical' }}
-                  />
-                  {jsonImportText.trim() && (
-                    <div style={{ marginTop: 6 }}>
-                      {jsonImportParsed ? (
-                        <div style={{ background: 'rgba(144,200,168,0.1)', border: '1px solid rgba(144,200,168,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 12, color: '#FAF6EC' }}>
-                          {jsonImportParsed.items.map((it, i) => (
-                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '2px 0' }}>
-                              <span style={{ fontWeight: 600 }}>{it.foodName}</span>
-                              <span style={{ fontSize: 11, color: 'rgba(250,246,236,0.75)', whiteSpace: 'nowrap' }}>
-                                {it.isManual
-                                  ? `${Math.round(it.kcalPer100g)} kcal`
-                                  : `${it.qty}${it.unit === 'g' ? ' g' : ' ' + it.unit} · ${Math.round(it.kcalPer100g * (it.units[it.unit] || 1) * it.qty / 100)} kcal`}
-                              </span>
-                            </div>
-                          ))}
-                          {jsonImportParsed.items.some(it => it.isNew && !it.isManual) && (
-                            <div style={{ fontSize: 11, color: '#90C8A8', marginTop: 4 }}>
-                              Neue Lebensmittel werden beim Eintragen im Glossar angelegt.
-                            </div>
-                          )}
-                          {jsonImportParsed.note && (
-                            <div style={{ fontSize: 11, color: 'rgba(250,246,236,0.65)', marginTop: 4 }}>
-                              {jsonImportParsed.note}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div style={{ background: 'rgba(232,168,124,0.1)', border: '1px solid rgba(232,168,124,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 11, color: '#E8A87C' }}>
-                          Kein gültiges JSON erkannt. Unterstützt: Mahlzeit-Block ({'{ eintraege: [...] }'}), Einzel-Lebensmittel ({'{ name, kcalPer100g, ... }'}) und Rezept-JSON ({'{ dish, newFoods }'}).
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                    {jsonImportParsed && (
-                      <button
-                        onClick={() => {
-                          setParsed(prev => [...prev, ...jsonImportParsed.items]);
-                          setJsonImportText('');
-                          setShowJsonImport(false);
-                        }}
-                        style={{ flex: 1, background: '#1A5340', border: '1px solid #90C8A8', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC' }}
-                      >In Vorschau übernehmen</button>
-                    )}
-                    <button
-                      onClick={() => { setShowJsonImport(false); setJsonImportText(''); }}
-                      style={{ flex: jsonImportParsed ? 0 : 1, minWidth: 90, background: 'transparent', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.7)' }}
-                    >Abbrechen</button>
-                  </div>
-                </div>
-              )}
-
               {/* Chat-Workflow als Fallback ohne API-Key */}
               {!apiKey && (
                 <div style={{ marginTop: 14, padding: 12, background: 'rgba(250,246,236,0.05)', border: '1px solid rgba(250,246,236,0.12)', borderRadius: 10 }}>
@@ -5845,6 +5768,76 @@ function InputView({ glossary, dishes = [], activities = [], currentWeight = 75,
               )}
             </div>
           )}
+          {/* Universeller JSON-Import aus dem Chat */}
+          {!showJsonImport && (
+            <button
+              onClick={() => setShowJsonImport(true)}
+              style={{ ...styles.secondary, marginTop: 6 }}
+            >{'{ }'} JSON aus Chat einfügen</button>
+          )}
+          {showJsonImport && (
+            <div style={{ marginTop: 8, padding: 12, background: 'rgba(250,246,236,0.05)', border: '1px solid rgba(250,246,236,0.12)', borderRadius: 10 }}>
+              <div style={{ fontFamily: 'Inter', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(250,246,236,0.55)', marginBottom: 8 }}>
+                JSON-Import
+              </div>
+              <textarea
+                value={jsonImportText}
+                onChange={e => setJsonImportText(e.target.value)}
+                placeholder='JSON-Block hier einfügen (Mahlzeit, Lebensmittel oder Rezept)...'
+                rows={6}
+                style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(0,0,0,0.25)', color: '#FAF6EC', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 6, padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, outline: 'none', resize: 'vertical' }}
+              />
+              {jsonImportText.trim() && (
+                <div style={{ marginTop: 6 }}>
+                  {jsonImportParsed ? (
+                    <div style={{ background: 'rgba(144,200,168,0.1)', border: '1px solid rgba(144,200,168,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 12, color: '#FAF6EC' }}>
+                      {jsonImportParsed.items.map((it, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '2px 0' }}>
+                          <span style={{ fontWeight: 600 }}>{it.foodName}</span>
+                          <span style={{ fontSize: 11, color: 'rgba(250,246,236,0.75)', whiteSpace: 'nowrap' }}>
+                            {it.isManual
+                              ? `${Math.round(it.kcalPer100g)} kcal`
+                              : `${it.qty}${it.unit === 'g' ? ' g' : ' ' + it.unit} · ${Math.round(it.kcalPer100g * (it.units[it.unit] || 1) * it.qty / 100)} kcal`}
+                          </span>
+                        </div>
+                      ))}
+                      {jsonImportParsed.items.some(it => it.isNew && !it.isManual) && (
+                        <div style={{ fontSize: 11, color: '#90C8A8', marginTop: 4 }}>
+                          Neue Lebensmittel werden beim Eintragen im Glossar angelegt.
+                        </div>
+                      )}
+                      {jsonImportParsed.note && (
+                        <div style={{ fontSize: 11, color: 'rgba(250,246,236,0.65)', marginTop: 4 }}>
+                          {jsonImportParsed.note}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ background: 'rgba(232,168,124,0.1)', border: '1px solid rgba(232,168,124,0.3)', borderRadius: 6, padding: 8, fontFamily: 'Inter', fontSize: 11, color: '#E8A87C' }}>
+                      Kein gültiges JSON erkannt. Unterstützt: Mahlzeit-Block ({'{ eintraege: [...] }'}), Einzel-Lebensmittel ({'{ name, kcalPer100g, ... }'}) und Rezept-JSON ({'{ dish, newFoods }'}).
+                    </div>
+                  )}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                {jsonImportParsed && (
+                  <button
+                    onClick={() => {
+                      setParsed(prev => [...prev, ...jsonImportParsed.items]);
+                      setJsonImportText('');
+                      setShowJsonImport(false);
+                    }}
+                    style={{ flex: 1, background: '#1A5340', border: '1px solid #90C8A8', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: '#FAF6EC' }}
+                  >In Vorschau übernehmen</button>
+                )}
+                <button
+                  onClick={() => { setShowJsonImport(false); setJsonImportText(''); }}
+                  style={{ flex: jsonImportParsed ? 0 : 1, minWidth: 90, background: 'transparent', border: '1px solid rgba(250,246,236,0.2)', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.7)' }}
+                >Abbrechen</button>
+              </div>
+            </div>
+          )}
+
           {searchResults.length === 0 && !textInput && glossary.length === 0 && (
             <div style={{ padding: '24px 16px', textAlign: 'center', fontFamily: 'Inter', fontSize: 13, color: 'rgba(250,246,236,0.6)' }}>
               Glossar ist leer.
