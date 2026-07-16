@@ -21,7 +21,7 @@
 
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -64,7 +64,7 @@
     }
   </script>
 
-  <script type="text/babel" data-presets="react">
+  <script type="text/babel" data-presets="env,react">
     // === HIER WIRD GLEICH DER CODE EINGEFÜGT ===
     // (Der gesamte Inhalt von kalorientracker-v3.jsx, aber ohne import-Zeilen)
     // Wir laden lucide-react über CDN als Globals stattdessen:
@@ -131,12 +131,13 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.80';
+const APP_VERSION = '3.81';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
-  { v: '3.80', changes: ['Kritischer Fix: Babel-Preset korrigiert (env raus), das den grünen Bildschirm verursachte'] },
+  { v: '3.81', changes: ['Kritischer Fix v2: Babel-Standalone auf stabile Version 7.24.7 gepinnt statt latest (die neue Version verursachte den import-Fehler)'] },
+  { v: '3.80', changes: ['Versuch grüner Bildschirm zu fixen (nicht erfolgreich)'] },
   { v: '3.79', changes: ['Gewicht-Eintragen: Speichern per Enter-Taste, Sheet scrollbar wenn Tastatur den Button verdeckt'] },
   { v: '3.78', changes: ['ErrorBoundary: bei Fehlern wird statt grünem Bildschirm die Fehlermeldung gezeigt'] },
   { v: '3.77', changes: ['Gericht-Eintragen mit Name-Fallback: findet Lebensmittel auch bei veralteten IDs, damit Makros nicht verloren gehen'] },
