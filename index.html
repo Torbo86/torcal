@@ -64,7 +64,7 @@
     }
   </script>
 
-  <script type="text/babel" data-presets="env,react">
+  <script type="text/babel" data-presets="react">
     // === HIER WIRD GLEICH DER CODE EINGEFÜGT ===
     // (Der gesamte Inhalt von kalorientracker-v3.jsx, aber ohne import-Zeilen)
     // Wir laden lucide-react über CDN als Globals stattdessen:
@@ -131,11 +131,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.79';
+const APP_VERSION = '3.80';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.80', changes: ['Kritischer Fix: Babel-Preset korrigiert (env raus), das den grünen Bildschirm verursachte'] },
   { v: '3.79', changes: ['Gewicht-Eintragen: Speichern per Enter-Taste, Sheet scrollbar wenn Tastatur den Button verdeckt'] },
   { v: '3.78', changes: ['ErrorBoundary: bei Fehlern wird statt grünem Bildschirm die Fehlermeldung gezeigt'] },
   { v: '3.77', changes: ['Gericht-Eintragen mit Name-Fallback: findet Lebensmittel auch bei veralteten IDs, damit Makros nicht verloren gehen'] },
