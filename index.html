@@ -55,6 +55,51 @@
       },
     };
 
+    // Foto-Speicher in IndexedDB (localStorage ist mit 5-10 MB zu klein für Progress-Fotos)
+    window.photoStorage = (() => {
+      const DB_NAME = 'torcal-photos';
+      const STORE = 'photos';
+      let dbPromise = null;
+      const openDB = () => {
+        if (dbPromise) return dbPromise;
+        dbPromise = new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB_NAME, 1);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+        return dbPromise;
+      };
+      return {
+        getAll: async () => {
+          const db = await openDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE, 'readonly');
+            const req = tx.objectStore(STORE).get('progressPhotos');
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+          });
+        },
+        saveAll: async (photos) => {
+          const db = await openDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE, 'readwrite');
+            const req = tx.objectStore(STORE).put(photos, 'progressPhotos');
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
+        },
+      };
+    })();
+
+    // Persistent Storage anfordern, damit Browser bei Platzmangel nicht automatisch löscht
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().catch(() => {});
+    }
+
     // crypto.randomUUID Polyfill
     if (!window.crypto.randomUUID) {
       window.crypto.randomUUID = () =>
@@ -131,11 +176,12 @@
 
     
 // === Hilfsfunktionen ===
-const APP_VERSION = '3.83';
+const APP_VERSION = '3.84';
 const APP_NAME = 'Torcal';
 
 // === Versionshistorie (neueste zuerst) ===
 const CHANGELOG = [
+  { v: '3.84', changes: ['Progress-Fotos: Umstellung von localStorage (5-10 MB Limit) auf IndexedDB — Fotos gehen nicht mehr nach ~10 Stück verloren', 'Alte Fotos werden einmalig automatisch migriert', 'Save-Fehler zeigen jetzt eine sichtbare Meldung statt stillschweigend zu scheitern', 'Persistent-Storage angefordert, damit Browser bei Platzmangel nicht automatisch löscht'] },
   { v: '3.83', changes: ['Gericht-Portionen-Sheet scrollbar (Speichern-Button nicht mehr von Tastatur verdeckt)', 'Makros-Sicherheitsschicht: rechnet beim Eintragen immer frisch aus dem aktuellen Glossar'] },
   { v: '3.81', changes: ['Kritischer Fix v2: Babel-Standalone auf stabile Version 7.24.7 gepinnt statt latest (die neue Version verursachte den import-Fehler)'] },
   { v: '3.80', changes: ['Versuch grüner Bildschirm zu fixen (nicht erfolgreich)'] },
@@ -1478,7 +1524,22 @@ function App() {
       const d = await loadKey('dishes', []);
       const e = await loadKey('entries', []);
       const w = await loadKey('weights', []);
-      const photos = await loadKey('progressPhotos', []);
+      // Fotos aus IndexedDB laden (vorher localStorage → migrieren falls dort noch Daten liegen)
+      let photos = [];
+      try {
+        photos = await window.photoStorage.getAll();
+        const legacyPhotos = await loadKey('progressPhotos', []);
+        if (Array.isArray(legacyPhotos) && legacyPhotos.length > 0) {
+          const existingIds = new Set(photos.map(p => p.id));
+          const merged = [...photos, ...legacyPhotos.filter(p => !existingIds.has(p.id))];
+          await window.photoStorage.saveAll(merged);
+          photos = merged;
+          try { localStorage.removeItem('kt:progressPhotos'); } catch {}
+        }
+      } catch (e) {
+        console.error('Foto-Load fehlgeschlagen:', e);
+        photos = await loadKey('progressPhotos', []);
+      }
       const acts = await loadKey('activities', DEFAULT_ACTIVITIES);
       const wos = await loadKey('workouts', []);
       const aEntries = await loadKey('activityEntries', []);
@@ -1614,7 +1675,15 @@ function App() {
   const persistGlossary = async (next) => { setGlossary(next); await saveKey('glossary', next); };
   const persistDishes = async (next) => { setDishes(next); await saveKey('dishes', next); };
   const persistWeights = async (next) => { setWeights(next); await saveKey('weights', next); };
-  const persistProgressPhotos = async (next) => { setProgressPhotos(next); await saveKey('progressPhotos', next); };
+  const persistProgressPhotos = async (next) => {
+    setProgressPhotos(next);
+    try {
+      await window.photoStorage.saveAll(next);
+    } catch (e) {
+      console.error('Foto-Speichern fehlgeschlagen:', e);
+      alert('Foto konnte nicht dauerhaft gespeichert werden: ' + (e.message || e.name || 'Speicher voll?') + '\n\nTipp: Alte Fotos löschen oder Browser-Speicher prüfen.');
+    }
+  };
 
   // Bild auf max. 800px verkleinern, JPEG bei 0.82 Qualität (~100-180 KB)
   const resizePhoto = (file) => new Promise((resolve, reject) => {
